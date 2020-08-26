@@ -16,7 +16,6 @@ struct dhmp_client{
 	struct list_head dev_list;
 
 	struct dhmp_transport *connect_trans[DHMP_SERVER_NODE_NUM];
-	struct dhmp_transport *poll_trans[DHMP_SERVER_NODE_NUM];
 
 	/*store the dhmp_addr_entry hashtable*/
 	//pthread_mutex_t mutex_ht;

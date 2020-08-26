@@ -12,7 +12,7 @@
 struct dhmp_client *client=NULL;
 int rdelay,wdelay,knum;
 
-static struct dhmp_transport* dhmp_node_select()
+static struct dhmp_transport* dhmp_node_select() // 循环select
 {
 	int i;
 	
@@ -215,6 +215,81 @@ int dhmp_write(void *dhmp_addr, void * local_buf, size_t count)
 	wwork.rdma_trans=rdma_trans;
 			
 	work->work_type=DHMP_WORK_WRITE;
+	work->work_data=&wwork;
+	
+	pthread_mutex_lock(&client->mutex_work_list);
+	list_add_tail(&work->work_entry, &client->work_list);
+	pthread_mutex_unlock(&client->mutex_work_list);
+	
+	while(!wwork.done_flag);
+
+	free(work);
+	
+	return 0;
+}
+
+
+int amper_clover_compare_and_set(void *dhmp_addr)
+{
+	struct dhmp_transport *rdma_trans=NULL;
+	struct amper_clover_work wwork;
+	struct dhmp_work *work;
+
+	rdma_trans=dhmp_get_trans_from_addr(dhmp_addr);
+	if(!rdma_trans||rdma_trans->trans_state!=DHMP_TRANSPORT_STATE_CONNECTED)
+	{
+		ERROR_LOG("rdma connection error.");
+		return -1;
+	}
+
+	work=malloc(sizeof(struct dhmp_work));
+	if(!work)
+	{
+		ERROR_LOG("alloc memory error.");
+		return -1;
+	}
+	wwork.done_flag=false;
+	wwork.dhmp_addr=dhmp_addr;
+	wwork.rdma_trans=rdma_trans;
+			
+	work->work_type=AMPER_WORK_CLOVER;
+	work->work_data=&wwork;
+	
+	pthread_mutex_lock(&client->mutex_work_list);
+	list_add_tail(&work->work_entry, &client->work_list);
+	pthread_mutex_unlock(&client->mutex_work_list);
+	
+	while(!wwork.done_flag);
+
+	free(work);
+	
+	return 0;
+}
+
+int amper_write_L5(struct ibv_mr *mr, size_t offset, struct ibv_mr *mr2, size_t offset2, void * local_buf2, size_t count2)
+{
+	struct dhmp_transport *rdma_trans= client->connect_trans[0]; // assume only one server
+	struct amper_L5_work wwork;
+	struct dhmp_work *work;
+
+	if(!rdma_trans||rdma_trans->trans_state!=DHMP_TRANSPORT_STATE_CONNECTED)
+	{
+		ERROR_LOG("rdma connection error.");
+		return -1;
+	}
+
+	work=malloc(sizeof(struct dhmp_work));
+	if(!work)
+	{
+		ERROR_LOG("alloc memory error.");
+		return -1;
+	}
+	wwork.done_flag=false;
+	wwork.length=count2;
+	wwork.local_addr=local_buf2;
+	wwork.rdma_trans=rdma_trans;
+			
+	work->work_type=AMPER_WORK_L5;
 	work->work_data=&wwork;
 	
 	pthread_mutex_lock(&client->mutex_work_list);
@@ -763,7 +838,7 @@ void model_D_send(void * server_addr, size_t length, void * local_addr)
 
 void model_1_octopus(void * globle_addr, size_t length, void * local_addr)
 {
-	void * server_addr = GetAddr_request1(globle_addr, length, NULL,NULL);
+	void * server_addr = GetAddr_request1(globle_addr, length, NULL,NULL); //write imm and flush
 	dhmp_write(server_addr, local_addr, length);
 }
 
@@ -771,7 +846,7 @@ void model_1_clover(void * globle_addr, size_t length, void * local_addr)
 {
 	//void * server_addr = GetAddr_request1(globle_addr, length, NULL,NULL); //忽略分配过程或者write N次后RPC一次
 	dhmp_write(globle_addr, local_addr, length);
-	clover_compare_and_set(globle_addr,client->clover);
+	amper_clover_compare_and_set(globle_addr);
 }
 
 void model_4_RFP(void * globle_addr, size_t length, void * local_addr)
@@ -783,8 +858,33 @@ void model_4_RFP(void * globle_addr, size_t length, void * local_addr)
 
 void model_5_L5(void * globle_addr, size_t length, void * local_addr)
 {
-	amper_write_2(&(client->L5.mailbox_mr), client->L5.mailbox_offset, 1, 1, &(client->L5.message_mr), 0, local_addr, length);
+	amper_write_L5(&(client->L5.mailbox_mr), client->L5.mailbox_offset, &(client->L5.message_mr), 0, local_addr, length);
 }
+
+void model_6_tailwind(size_t length, void * local_addr, int accessnum, int * rand_num)
+{
+	int i = 0;
+	size_t count = length+ sizeof(size_t) + sizeof(uint32_t);//data+size+CRC
+	char * tailwind_data = malloc(count);
+	// memcpy(tailwind_data,local_addr);
+	GetAddr_request1(rand_num[i++], length, NULL,NULL);
+	for(; i < accessnum-1; i++)
+		dhmp_write(rand_num[i], tailwind_data, count);
+	GetAddr_request1(rand_num[i], length, NULL,NULL);
+}
+
+void model_7_scalable(size_t length, void * local_addr, int accessnum, int * rand_num)
+{
+	const int batch = 8;
+	int i = 0;
+	size_t count = batch * (length+ sizeof(size_t) + 1);//data+size+vaild * batch
+	char * scalable_data = malloc(count);
+	client->per_ops_mr_addr2 = malloc(size+1024);//request+data
+	client->per_ops_mr2 =dhmp_create_mr_per_ops(client->connect_trans[i], client->per_ops_mr_addr2, size+1024);
+	// memcpy(scalable_data,local_addr);
+	dhmp_write(accessnum, length, scalable_data,batch);
+}
+
 
 void *dhmp_malloc_messagebuffer(size_t length, int is_special)
 {

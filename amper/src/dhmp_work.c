@@ -252,6 +252,148 @@ out:
 	wwork->done_flag=true;
 }
 
+void amper_clover_work_handler(struct dhmp_work *work)
+{
+	struct dhmp_addr_info *addr_info;
+	struct amper_clover_work *wwork;
+	int index;
+	
+	wwork=(struct amper_clover_work *)work->work_data;
+	
+	index=dhmp_hash_in_client(wwork->dhmp_addr);
+	addr_info=dhmp_get_addr_info_from_ht(index, wwork->dhmp_addr);
+	if(!addr_info)
+	{
+		ERROR_LOG("write addr is error.");
+		goto out;
+	}
+
+	/*check no the same addr write task in qp*/
+	while(addr_info->write_flag);
+	addr_info->write_flag=true;
+	++addr_info->write_cnt;
+
+	struct dhmp_task* clover_task;
+	struct ibv_send_wr send_wr,*bad_wr=NULL;
+	struct ibv_sge sge;
+	int err=0;
+	struct ibv_mr* mr = &(addr_info->nvm_mr);
+
+	clover_task = dhmp_write_task_create(wwork->rdma_trans, NULL, wwork->length);
+	if(!L5_task)
+	{
+		ERROR_LOG("allocate memory error.");
+		return -1;
+	}
+	
+	memset(&send_wr, 0, sizeof(struct ibv_send_wr));
+	send_wr.wr_id= ( uintptr_t ) clover_task;
+	send_wr.opcode=IBV_WR_ATOMIC_CMP_AND_SWP;
+	send_wr.sg_list=NULL;
+	send_wr.num_sge=0;
+	send_wr.send_flags=IBV_SEND_SIGNALED;
+	send_wr.wr.atomic.remote_addr= ( uintptr_t ) mr->addr;
+	send_wr.wr.atomic.rkey=mr->rkey;
+	send_wr.wr.atomic.compare_add = 0ULL;
+	send_wr.wr.atomic.swap = 0ULL;
+
+	err=ibv_post_send ( wwork->rdma_trans->qp, &send_wr, &bad_wr );
+	if ( err )
+	{
+		ERROR_LOG("ibv_post_send error");
+		exit(-1);
+		return -1;
+	}	
+	while(!clover_task->done_flag);
+out:
+	wwork->done_flag=true;
+}
+
+void amper_L5_work_handler(struct dhmp_work *work)   /// same as two write
+{
+	struct amper_L5_work *wwork;
+	wwork=(struct amper_L5_work *)work->work_data;
+	/*check no the same addr write task in qp*/
+	struct dhmp_task* L5_task;
+	struct ibv_send_wr send_wr,*bad_wr=NULL;
+	struct ibv_sge sge;
+	struct dhmp_send_mr* temp_mr=NULL;
+	int err=0;
+	
+	memcpy(client->per_ops_mr_addr, wwork->local_addr, wwork->length);
+	temp_mr=client->per_ops_mr;
+	L5_task=dhmp_write_task_create(wwork->rdma_trans, temp_mr, wwork->length);
+	if(!L5_task)
+	{
+		ERROR_LOG("allocate memory error.");
+		return -1;
+	}
+	
+	memset(&send_wr, 0, sizeof(struct ibv_send_wr));
+
+	send_wr.wr_id= ( uintptr_t ) L5_task;
+	send_wr.opcode=IBV_WR_RDMA_WRITE;
+	send_wr.sg_list=&sge;
+	send_wr.num_sge=1;
+	send_wr.send_flags=IBV_SEND_SIGNALED;
+	send_wr.wr.rdma.remote_addr= ( uintptr_t ) mr->addr;
+	send_wr.wr.rdma.rkey=mr->rkey;
+
+// 	sge.addr= ( uintptr_t ) write_task->sge.addr;
+// 	sge.length=write_task->sge.length;
+// 	sge.lkey=write_task->sge.lkey;
+// #ifdef FLUSH
+// 	struct dhmp_task* read_task;
+// 	struct ibv_send_wr send_wr2,*bad_wr2=NULL;
+// 	struct ibv_sge sge2;
+// 	read_task=dhmp_read_task_create(rdma_trans, client->per_ops_mr2, length);
+// 	if ( !read_task )
+// 	{
+// 		ERROR_LOG ( "allocate memory error." );
+// 		return -1;
+// 	}
+
+// 	memset(&send_wr2, 0, sizeof(struct ibv_send_wr));
+
+// 	send_wr2.wr_id= ( uintptr_t ) read_task;
+// 	send_wr2.opcode=IBV_WR_RDMA_READ;
+// 	send_wr2.sg_list=&sge2;
+// 	send_wr2.num_sge=1; // or 1
+// 	send_wr2.send_flags=IBV_SEND_SIGNALED;
+// 	send_wr2.wr.rdma.remote_addr=(uintptr_t)mr->addr;
+// 	send_wr2.wr.rdma.rkey=mr->rkey;
+
+// 	sge2.addr=(uintptr_t)read_task->sge.addr;
+// 	sge2.length=read_task->sge.length; 
+// 	sge2.lkey=read_task->sge.lkey;
+// #endif
+// 	err=ibv_post_send ( rdma_trans->qp, &send_wr, &bad_wr );
+// 	if ( err )
+// 	{
+// 		ERROR_LOG("ibv_post_send error");
+// 		exit(-1);
+// 		return -1;
+// 	}		
+// #ifdef FLUSH
+// 	err=ibv_post_send(rdma_trans->qp, &send_wr2, &bad_wr2);
+// 	if(err)
+// 	{
+// 		ERROR_LOG("ibv_post_send error");
+// 		return -1;
+// 	}
+
+// 	DEBUG_LOG("before read_test_mr addr is %s", client->per_ops_mr2->mr->addr);
+// 	while(!read_task->done_flag);			
+// 	DEBUG_LOG("read_test_mr addr content is %s", client->per_ops_mr2->mr->addr);
+// #else
+// 	while(!write_task->done_flag);
+// #endif
+
+
+// out:
+// 	wwork->done_flag=true;
+}
+
 void dhmp_write2_work_handler(struct dhmp_work *work)
 {
 	struct dhmp_rw2_work *wwork;
@@ -549,6 +691,12 @@ void *dhmp_work_handle_thread(void *data)
 					break;
 				case DHMP_WORK_READ:
 					dhmp_read_work_handler(work);
+					break;
+				case AMPER_WORK_CLOVER:
+					amper_clover_work_handler(work);
+					break;
+				case AMPER_WORK_L5:
+					amper_L5_work_handler(work);
 					break;
 				case DHMP_WORK_WRITE:
 					dhmp_write_work_handler(work);

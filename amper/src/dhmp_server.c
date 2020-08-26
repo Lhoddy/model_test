@@ -240,15 +240,17 @@ void *model_C_Sread_run()
 void *L5_run()
 {
 	INFO_LOG("start L5 epoll");
+	int i = 0;
 	while(1)
 	{
 		if(server->L5_mailbox.addr == NULL) continue;
-		if((*((bool *)(server->L5_mailbox.addr))) == true)
+		if((*((char *)(server->L5_mailbox.addr + i))) != 0)
 		{
-			INFO_LOG("get new model_B message");
-			dhmp_Write2_request_handler();
-			*((bool *)(server->L5_mailbox.addr)) = false;
+			INFO_LOG("get new L5 message");
+			*((char *)(server->L5_mailbox.addr + i)) = 0;
+			//amper_L5_request_handler();
 		}
+		i = (i+1) % server->client_num;
 	}
 	return NULL;
 }

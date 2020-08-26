@@ -69,11 +69,12 @@ int main(int argc,char *argv[])
 		printf("alloc mem error");
 		return -1;
 	}
-	snprintf(str, size, "hello world hello");
+	memset(str, 0 , size);
+	snprintf(str+8, size, "hello world hello");
 	
 	dhmp_client_init(size,objnum);
 	dhmp_malloc(obj_num,2); // clover c&s point
-	dhmp_malloc(size,3); //for RFP
+	dhmp_malloc(size,3); //for L5
 	
 	for(i=0;i<objnum;i++)
 	{
@@ -102,6 +103,8 @@ int main(int argc,char *argv[])
 		model_4_RFP(addr[rand_num[i]], size, str);
 		model_5_L5(addr[rand_num[i]], size, str);
 	}
+
+	
 
 	clock_gettime(CLOCK_MONOTONIC, &task_time_end);
 	fprintf(stderr,"over count");

@@ -230,6 +230,10 @@ int dhmp_read(void *dhmp_addr, void * local_buf, size_t count);
  */
 int dhmp_write(void *dhmp_addr, void * local_buf, size_t count);
 
+int amper_write_L5(struct ibv_mr *mr, size_t offset, struct ibv_mr *mr2, size_t offset2, void * local_buf2, size_t count2);
+
+int amper_clover_compare_and_set(void *dhmp_addr);
+
 /**
  *	dhmp_free:release remote memory
  */

@@ -10,6 +10,20 @@ struct dhmp_rw_work{
 	bool done_flag;
 };
 
+struct amper_clover_work{
+	struct dhmp_transport *rdma_trans;
+	void *dhmp_addr;
+	bool done_flag;
+};
+
+struct amper_L5_work{
+	struct dhmp_transport *rdma_trans;
+	void *local_addr;
+	size_t length;
+	bool done_flag;
+};
+
+
 struct dhmp_rw2_work{
 	struct dhmp_transport *rdma_trans;
 	size_t length;
@@ -124,7 +138,8 @@ enum dhmp_work_type{
 	DHMP_WORK_WRITEIMM2,
 	DHMP_WORK_WRITEIMM3,
 	DHMP_WORK_SREAD,
-	DHMP_WORK_WRITE2
+	DHMP_WORK_WRITE2,
+	AMPER_WORK_L5
 };
 
 

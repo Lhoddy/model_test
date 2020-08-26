@@ -69,6 +69,7 @@ struct dhmp_server{
 
 	struct  {
 		struct ibv_mr mr;
+		int client_num;
 		void * addr;
 	} L5_mailbox;
 	struct  {
