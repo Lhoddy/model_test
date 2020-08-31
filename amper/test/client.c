@@ -75,6 +75,8 @@ int main(int argc,char *argv[])
 	dhmp_client_init(size,objnum);
 	dhmp_malloc(obj_num,2); // clover c&s point
 	dhmp_malloc(size,3); //for L5
+	dhmp_malloc((size*objnum), 4); // for Tailwind
+	dhmp_malloc(0,5); //DaRPC
 	
 	for(i=0;i<objnum;i++)
 	{
@@ -87,7 +89,7 @@ int main(int argc,char *argv[])
 	for(j=0;j<accessnum;j++)
 	{ 
 		i = j%objnum;
-		model_A_write(addr[rand_num[i]], size, str);	/*need FLUSH for single*/
+		// model_A_write(addr[rand_num[i]], size, str);	/*need FLUSH for single*/
 		// model_A_writeImm(addr[rand_num[i]], size, str);
 		// model_B_write(addr[rand_num[i]], size, str);   				/*need model_B*/
 		// model_B_writeImm(addr[rand_num[i]], size, str);				
@@ -100,11 +102,16 @@ int main(int argc,char *argv[])
 
 		model_1_octopus(addr[rand_num[i]], size, str);
 		model_1_clover(addr[rand_num[i]], size, str);
-		model_4_RFP(addr[rand_num[i]], size, str);
+		// model_4_RFP(addr[rand_num[i]], size, str);
 		model_5_L5(addr[rand_num[i]], size, str);
+
 	}
 
-	
+	int batch = 8;
+	model_6_Tailwind(accessnum, rand_num, size, str); // only unif ，用的默认的send recv queue
+	// model_3_herd(addr[rand_num[i]], size, str); // UC
+	model_3_DaRPC(accessnum, rand_num, size, str ); //用的默认的send recv queue
+	model_7_scalable(accessnum, rand_num, size, str)
 
 	clock_gettime(CLOCK_MONOTONIC, &task_time_end);
 	fprintf(stderr,"over count");

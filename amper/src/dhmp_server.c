@@ -36,16 +36,7 @@ const size_t buddy_size[MAX_ORDER]=/* {32,64,128,256,512};*/
 //{4096,8192,16384,32768,65536};
 //{32768,65536,131072,262144,524288};
 struct dhmp_server *server=NULL;
-int dhmp_hash_in_server(void *nvm_addr)
-{
-	uint32_t key;
-	int index;
 
-	key=hash(&nvm_addr,sizeof(void*));
-	index=((key%DHMP_DRAM_HT_SIZE)+DHMP_DRAM_HT_SIZE)%DHMP_DRAM_HT_SIZE;
-
-	return index;
-}
 
 /**
  *	dhmp_get_dev_from_server:get the dev_ptr from dev_list of server.
@@ -248,7 +239,7 @@ void *L5_run()
 		{
 			INFO_LOG("get new L5 message");
 			*((char *)(server->L5_mailbox.addr + i)) = 0;
-			//amper_L5_request_handler();
+			//amper_L5_request_handler(); not need
 		}
 		i = (i+1) % server->client_num;
 	}
@@ -280,7 +271,7 @@ void dhmp_server_init()
 	dhmp_dev_list_init(&server->dev_list);
 
 
-for(i=0;i<DHMP_CLIENT_HT_SIZE;i++)
+	for(i=0;i<DHMP_CLIENT_HT_SIZE;i++)
 	{
 		INIT_HLIST_HEAD(&server->addr_info_ht[i]);
 	}
@@ -294,26 +285,22 @@ for(i=0;i<DHMP_CLIENT_HT_SIZE;i++)
 	server->nvm_used_size=0;
 	INFO_LOG("server nvm total size %ld",server->nvm_total_size);
 
-	
-
-
-	/*init dram cache*/
-	for(i=0; i<DHMP_DRAM_HT_SIZE; i++)
-		INIT_HLIST_HEAD(&server->dram_ht[i]);
-	
 	server->listen_trans=dhmp_transport_create(&server->ctx,
 											dhmp_get_dev_from_server(),
 											true, false);
-	server->listen_trans->node_id = 0;
-
-	//##############initial
-	server->L5_mailbox.addr == NULL;
-
 	if(!server->listen_trans)
 	{
 		ERROR_LOG("create rdma transport error.");
 		exit(-1);
 	}
+
+	//##############initial
+#ifdef DaRPC_SERVER
+	for(i=0; i<DaRPC_clust_NUM; i++)
+		server->DaRPC_dcq[i] = NULL;
+	amper_allocspace_for_server(server->listen_trans, 5, 0); // DaRPC
+#endif
+	server->L5_mailbox.addr == NULL;
 
 	err=dhmp_transport_listen(server->listen_trans,
 					server->config.net_infos[server->config.curnet_id].port);
@@ -356,18 +343,45 @@ void dhmp_server_destroy()
 void amper_allocspace_for_server(struct dhmp_transport* rdma_trans, int is_special, size_t size)
 {
 	int node_id = rdma_trans->node_id;
+	struct dhmp_send_mr* temp_smr;
 	switch(is_special)
 	{
-		case 2: // L5
+		case 3: // L5
 		{
 			if(node_id == 0) //for test
 			{
-				server->L5_mailbox.addr = nvm_malloc(20*sizeof(char)); // store client num  
-				dhmp_create_mr_per_ops(rdma_trans, server->L5_mailbox.addr, 20*sizeof(char));
+				server->L5_mailbox.addr = nvm_malloc(DHMP_CLIENT_NODE_NUM*sizeof(char)); // store client num  
+				temp_smr = dhmp_create_smr_per_ops(rdma_trans, server->L5_mailbox.addr, DHMP_CLIENT_NODE_NUM*sizeof(char));
+				server->L5_mailbox.mr = temp_smr->mr;
+				void *temp = nvm_malloc(sizeof(char)); // store client num  
+				temp_smr = dhmp_create_smr_per_ops(rdma_trans, temp, sizeof(char));
+				server->L5_mailbox.read_mr = temp_smr->mr;
 			}
+			//only use server's first dev
 			server->L5_message[node_id].addr = nvm_malloc(size);
-			dhmp_create_mr_per_ops(rdma_trans, server->L5_message[node_id].addr, size);
+			temp_smr = dhmp_create_smr_per_ops(rdma_trans, server->L5_message[node_id].addr, size);
+			server->L5_message[node_id].mr = temp_smr->mr;
+			
 		}
+		break;
+		case 4: // for tailwind
+		{
+			server->Tailwind_buffer[node_id].addr = nvm_malloc(size); 
+			temp_smr = dhmp_create_smr_per_ops(rdma_trans, server->Tailwind_buffer[node_id].addr, size);
+			server->Tailwind_buffer[node_id].mr = temp_smr->mr;
+
+			void *temp = nvm_malloc(sizeof(char)); 
+			temp_smr = dhmp_create_smr_per_ops(rdma_trans, temp, sizeof(char));
+			server->Tailwind_buffer[node_id].read_mr = temp_smr->mr;
+		}
+		break;
+		case 5: // for DaRPC only need once
+		{
+			void *temp = nvm_malloc(sizeof(char)); 
+			temp_smr = dhmp_create_smr_per_ops(rdma_trans, temp, sizeof(char));
+			server->read_mr = temp_smr->mr;
+		}
+		break;
 	};
 	return;
 }

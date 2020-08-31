@@ -30,6 +30,13 @@
 #define DHMP_SERVER_DRAM_TH ((uint64_t)1024*1024*1024*1)
 
 #define DHMP_SERVER_NODE_NUM 3
+#define DHMP_CLIENT_NODE_NUM 20
+
+
+//#define DaRPC_SERVER
+#define DaRPC_clust_NUM  5
+
+#define BATCH 10
 
 #define DHMP_DEFAULT_SIZE 256
 #define DHMP_DEFAULT_POLL_TIME 800000000
@@ -75,7 +82,11 @@ enum dhmp_msg_type{
 	DHMP_MSG_Sread_REQUEST,
 	DHMP_MSG_Sread_RESPONSE,
 	DHMP_MSG_Write2_REQUEST,
-	DHMP_MSG_Write2_RESPONSE
+	DHMP_MSG_Write2_RESPONSE,
+	DHMP_MSG_Tailwind_RPC_requeset,
+	DHMP_MSG_Tailwind_RPC_response,
+	DHMP_MSG_DaRPC_requeset,
+	DHMP_MSG_DaRPC_response
 };
 
 /*struct dhmp_msg:use for passing control message*/
@@ -112,9 +123,9 @@ struct dhmp_mc_response{
 	struct dhmp_mc_request req_info;
 	struct ibv_mr mr;
 	struct ibv_mr mr2;
+	struct ibv_mr read_mr;
 	void * server_addr;
 	void * server_addr2;
-	size_t offset;//for L5
 };
 
 /*dhmp free memory request msg*/
@@ -213,6 +224,27 @@ struct dhmp_Sread_response{
 	struct dhmp_Sread_request req_info;
 };
 
+
+struct dhmp_TailwindRPC_request{
+	size_t req_size;
+	void * dhmp_addr;
+	void * task;
+};
+
+struct dhmp_TailwindRPC_response{
+	struct dhmp_TailwindRPC_request req_info;
+};
+
+struct dhmp_DaRPC_request{
+	size_t req_size;
+	void * task;
+};
+
+struct dhmp_DaRPC_response{
+	struct dhmp_TailwindRPC_request req_info;
+};
+
+
 /**
  *	dhmp_malloc: remote alloc the size of length region
  */
@@ -230,7 +262,9 @@ int dhmp_read(void *dhmp_addr, void * local_buf, size_t count);
  */
 int dhmp_write(void *dhmp_addr, void * local_buf, size_t count);
 
-int amper_write_L5(struct ibv_mr *mr, size_t offset, struct ibv_mr *mr2, size_t offset2, void * local_buf2, size_t count2);
+int amper_write_L5( void * local_buf, size_t count);
+int amper_write_herd( void * local_buf, size_t count);
+int amper_write_Tailwind(size_t offset, void * local_buf, size_t count);
 
 int amper_clover_compare_and_set(void *dhmp_addr);
 
@@ -277,7 +311,9 @@ void model_1_octopus(void * globle_addr, size_t length, void * local_addr);
 void model_1_clover(void * globle_addr, size_t length, void * local_addr);
 void model_4_RFP(void * globle_addr, size_t length, void * local_addr);
 void model_5_L5(void * globle_addr, size_t length, void * local_addr);
-// void model_1_octopus(void * globle_addr, size_t length, void * local_addr);
+void model_6_Tailwind(int accessnum, int *rand_num , size_t length, void * local_addr);
+void model_3_DaRPC(int accessnum, int *rand_num ,size_t length, void * local_addr);
+void model_7_scalable(int accessnum, int *rand_num , size_t length, void * local_addr);
 // void model_1_clover(void * globle_addr, size_t length, void * local_addr);
 
 #endif

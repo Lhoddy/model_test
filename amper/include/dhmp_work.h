@@ -23,6 +23,30 @@ struct amper_L5_work{
 	bool done_flag;
 };
 
+struct amper_Tailwind_work{
+	struct dhmp_transport *rdma_trans;
+	void *local_addr;
+	size_t length;
+	size_t offset;
+	bool done_flag;
+	bool recv_flag;
+};
+
+struct amper_DaRPC_work{
+	struct dhmp_transport *rdma_trans;
+	void *local_addr;
+	size_t length;
+	bool done_flag;
+	bool recv_flag;
+};
+
+
+struct amper_scalable_work{
+	struct dhmp_transport *rdma_trans;
+	size_t length;
+	bool done_flag;
+};
+
 
 struct dhmp_rw2_work{
 	struct dhmp_transport *rdma_trans;
@@ -154,9 +178,10 @@ int dhmp_hash_in_client(void *addr);
 void *dhmp_transfer_dhmp_addr(struct dhmp_transport *rdma_trans,
 									void *normal_addr);
 struct dhmp_addr_info *dhmp_get_addr_info_from_ht(int index, void *dhmp_addr);
-struct dhmp_server_addr_info *dhmp_get_addr_info_from_ht_at_Server(int index, void *dhmp_addr);
-void dhmp_addr_info_insert_ht_at_Server(void *dhmp_addr,
-											struct dhmp_server_addr_info *addr_info);
+
+
+int amper_post_write(struct dhmp_task* task, struct ibv_mr* rmr, uint64_t* sge_addr, uint32_t sge_length,uint32_t sge_lkey ,bool is_inline);
+int amper_post_read(struct dhmp_task* task, struct ibv_mr* rmr, uint64_t* sge_addr, uint32_t sge_length,uint32_t sge_lkey ,bool is_inline);
 #endif
 
 

@@ -56,7 +56,6 @@ struct dhmp_transport{
 	struct dhmp_mr recv_mr;
 	
 	bool is_poll_qp;
-	struct dhmp_transport *link_trans;
 
 	long dram_used_size;
 	long nvm_used_size;
@@ -85,7 +84,7 @@ int dhmp_transport_listen(struct dhmp_transport* rdma_trans, int listen_port);
 
 void dhmp_post_send(struct dhmp_transport* rdma_trans, struct dhmp_msg* msg_ptr);
 
-struct dhmp_send_mr* dhmp_create_mr_per_ops(struct dhmp_transport* rdma_trans, void* addr, int length );
+struct dhmp_send_mr* dhmp_create_smr_per_ops(struct dhmp_transport* rdma_trans, void* addr, int length );
 
 void dhmp_WriteImm3_request_handler(struct dhmp_transport* rdma_trans) ;
 void dhmp_WriteImm3_response_handler(struct dhmp_transport* rdma_trans, struct dhmp_msg* msg);

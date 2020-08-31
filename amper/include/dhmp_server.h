@@ -4,7 +4,6 @@
 #define MAX_ORDER 5
 #define SINGLE_AREA_SIZE 4194304  
 
-#define DHMP_DRAM_HT_SIZE 251
 
 extern const size_t buddy_size[MAX_ORDER];
 
@@ -41,6 +40,7 @@ struct dhmp_server{
 	struct dhmp_config config;
 
 	struct dhmp_transport *listen_trans;
+	struct dhmp_transport *connect_trans[DHMP_CLIENT_NODE_NUM];
 
 	struct hlist_head addr_info_ht[DHMP_CLIENT_HT_SIZE];	
 
@@ -56,8 +56,6 @@ struct dhmp_server{
 	int cur_connections;
 	long nvm_used_size;
 	long nvm_total_size;
-
-	struct hlist_head dram_ht[DHMP_DRAM_HT_SIZE];
 	
 	void * ringbufferAddr;
 	uint64_t cur_addr;
@@ -68,15 +66,31 @@ struct dhmp_server{
 	bool model_C_new_msg;
 
 	struct  {
-		struct ibv_mr mr;
+		struct ibv_mr* mr;
 		int client_num;
 		void * addr;
+		struct ibv_mr* read_mr;
 	} L5_mailbox;
 	struct  {
-		struct ibv_mr mr;
+		struct ibv_mr* mr;
 		void * addr;
-	} L5_message[20]; //20 for client num
+	} L5_message[DHMP_CLIENT_NODE_NUM]; 
 	pthread_t L5_epoll_thread;
+
+	struct  {
+		struct ibv_mr* mr;
+		void * addr;
+		struct ibv_mr* read_mr;
+	} Tailwind_buffer[DHMP_CLIENT_NODE_NUM];
+
+	struct  {
+		struct ibv_mr* mr;
+		void * addr;
+		struct ibv_mr* read_mr;
+	} herd_buffer[DHMP_CLIENT_NODE_NUM];
+
+	struct ibv_mr* read_mr;
+	struct dhmp_cq* DaRPC_dcq[DaRPC_clust_NUM];
 };
 
 extern struct dhmp_server *server;
@@ -84,7 +98,6 @@ extern struct dhmp_server *server;
 struct dhmp_area *dhmp_area_create(bool is_init_buddy, size_t length);
 struct ibv_mr * dhmp_malloc_poll_area(size_t length);
 
-int dhmp_hash_in_server(void *nvm_addr);
 struct dhmp_device *dhmp_get_dev_from_server();
 
 void amper_allocspace_for_server(struct dhmp_transport* rdma_trans, int is_special, size_t size);
