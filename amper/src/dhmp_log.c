@@ -5,7 +5,7 @@
 #include <stdarg.h>
 
 #include "dhmp_log.h"
-//#define DEBUG_ON
+#define DEBUG_ON
 #define LOG_TIME_FMT "%04d/%02d/%02d-%02d:%02d:%02d.%05ld"
 
 enum dhmp_log_level global_log_level=DHMP_LOG_LEVEL_WARN;

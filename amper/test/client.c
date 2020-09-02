@@ -1,13 +1,28 @@
 #include <stdio.h>
 
 #include "dhmp.h"
-#define  obj_num_max  10005
+#define  obj_num_max  1005
+
+// #define octopus 0.5
+// #define clover  0.5
+// #define L5  1
+// #define Tailwind  1
+// #define DaRPC   1
+// #define scalable
+// #define RFP   1
 
 const double A = 1.3;  
 const double C = 1.0;  
 
 double pf[obj_num_max]; 
 int rand_num[obj_num_max]={0};
+
+void show(const char * str, struct timespec* time)
+{
+	fprintf(stderr,str);	
+	fflush(stderr);
+	clock_gettime(CLOCK_MONOTONIC, time);	
+}
 
 void generate()
 {
@@ -60,8 +75,8 @@ int main(int argc,char *argv[])
 	else
 	{
 		size=atoi(argv[1]);
-		objnum=10000;//atoi(argv[2]);
-		accessnum = 100000;//atoi(argv[3]);
+		objnum=1000;//atoi(argv[2]);
+		accessnum = 10000;//atoi(argv[3]);
 	}
 	pick();
 	str=malloc(size);
@@ -70,60 +85,72 @@ int main(int argc,char *argv[])
 		return -1;
 	}
 	memset(str, 0 , size);
-	snprintf(str+8, size, "hello world hello");
+	snprintf(str+8, size-8, "hello world hello");
 	
 	dhmp_client_init(size,objnum);
-	dhmp_malloc(obj_num,2); // clover c&s point
-	dhmp_malloc(size,3); //for L5
-	dhmp_malloc((size*objnum), 4); // for Tailwind
-	dhmp_malloc(0,5); //DaRPC
-	
+
+#ifdef octopus
 	for(i=0;i<objnum;i++)
-	{
 		addr[i]=dhmp_malloc(size,0);
-	}
-	fprintf(stderr,"start count");	
-	fflush(stderr);
-	clock_gettime(CLOCK_MONOTONIC, &task_time_start);	
 	int j;
 	for(j=0;j<accessnum;j++)
 	{ 
 		i = j%objnum;
-		// model_A_write(addr[rand_num[i]], size, str);	/*need FLUSH for single*/
-		// model_A_writeImm(addr[rand_num[i]], size, str);
-		// model_B_write(addr[rand_num[i]], size, str);   				/*need model_B*/
-		// model_B_writeImm(addr[rand_num[i]], size, str);				
-		// model_B_send(addr[rand_num[i]], size, str);
-		// model_C_sread(addr[rand_num[i]], size, str);					/*need model_C*/
-		// model_D_write(addr[rand_num[i]], size, str);	/*need FLUSH for single*/  
-		// model_D_writeImm(addr[rand_num[i]], size, str);				
-
-		// model_D_send(addr[i], size, str);
-
 		model_1_octopus(addr[rand_num[i]], size, str);
-		model_1_clover(addr[rand_num[i]], size, str);
-		// model_4_RFP(addr[rand_num[i]], size, str);
-		model_5_L5(addr[rand_num[i]], size, str);
-
 	}
-
-	int batch = 8;
-	model_6_Tailwind(accessnum, rand_num, size, str); // only unif ，用的默认的send recv queue
-	// model_3_herd(addr[rand_num[i]], size, str); // UC
-	model_3_DaRPC(accessnum, rand_num, size, str ); //用的默认的send recv queue
-	model_7_scalable(accessnum, rand_num, size, str)
-
-	clock_gettime(CLOCK_MONOTONIC, &task_time_end);
-	fprintf(stderr,"over count");
-    fflush(stderr);
-	for(i=0;i<objnum;i++)
-	{
+	for(i=0;i<objnum;i++)	
 		dhmp_free(addr[i]);
+#endif
+#ifdef clover
+	dhmp_malloc(objnum,2); // clover c&s point
+	for(i=0;i<objnum;i++)
+		addr[i]=dhmp_malloc(size,0);
+	for(j=0;j<accessnum;j++)
+	{ 
+		i = j%objnum;
+		model_1_clover(addr[i], size, str, addr[rand_num[i]]);
 	}
+	for(i=0;i<objnum;i++)
+		dhmp_free(addr[i]);
+#endif
+#ifdef L5
+	dhmp_malloc(size,3); //for L5
+	for(j=0;j<accessnum;j++)
+	{ 
+		i = j%objnum;
+		model_5_L5(size, str);
+	}
+#endif
+#ifdef Tailwind
+	dhmp_malloc((size*objnum), 4); // for Tailwind
+	model_6_Tailwind(accessnum,objnum, rand_num, size, str); // only unif ，用的默认的send recv queue  
+#endif
+#ifdef DaRPC
+	dhmp_malloc(0,5); //DaRPC
+	model_3_DaRPC(accessnum, rand_num, size, str ); //用的默认的send recv queue
+	
+#endif
+#ifdef scalable
+	dhmp_malloc(0,7); //scalable
+	model_7_scalable(accessnum, rand_num, size, str);
+	
+#endif
+#ifdef RFP
+	dhmp_malloc(size,6); //RFP
+	for(j=0;j<accessnum;j++)
+	{ 
+		model_4_RFP(size, str);  
+	}
+#endif
+
+	show("start count",&task_time_start);
+	show("over count",&task_time_end);
+	
+
 	dhmp_client_destroy();
 	task_time_diff_ns = ((task_time_end.tv_sec * 1000000000) + task_time_end.tv_nsec) -
                         ((task_time_start.tv_sec * 1000000000) + task_time_start.tv_nsec);
-  	printf("runtime %lf\n", (double)task_time_diff_ns/1000000);
+  	printf("runtime %lf ms\n", (double)task_time_diff_ns/1000000);
 	return 0;
 }
 

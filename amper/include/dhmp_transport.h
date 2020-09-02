@@ -101,5 +101,12 @@ void dhmp_Write2_response_handler(struct dhmp_transport* rdma_trans, struct dhmp
 void dhmp_Sread_request_handler(struct dhmp_transport* rdma_trans, struct dhmp_msg* msg);
 void dhmp_Sread_response_handler(struct dhmp_transport* rdma_trans, struct dhmp_msg* msg);
 void dhmp_Sread_server();
+
+
+
+void amper_tailwindRPC_request_handler(struct dhmp_transport* rdma_trans, struct dhmp_msg* msg);
+void amper_tailwindRPC_response_handler(struct dhmp_transport* rdma_trans, struct dhmp_msg* msg);
+void amper_DaRPC_request_handler(struct dhmp_transport* rdma_trans, struct dhmp_msg* msg);
+void amper_DaRPC_response_handler(struct dhmp_transport* rdma_trans, struct dhmp_msg* msg);
 #endif
 

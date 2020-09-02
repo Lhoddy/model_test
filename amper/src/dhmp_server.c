@@ -176,7 +176,7 @@ struct ibv_mr * dhmp_malloc_poll_area(size_t length)
 	bool res;
 	
 	/*nvm memory*/
-	addr=nvm_malloc(length);
+	addr = nvm_malloc(length);
 	if(!addr)
 	{
 		ERROR_LOG("allocate nvm memory error.");
@@ -246,6 +246,51 @@ void *L5_run()
 	return NULL;
 }
 
+void amper_scalable_request_handler(int node_id, size_t size)
+{
+	struct dhmp_task* scalable_task;
+	scalable_task = dhmp_read_task_create(server->connect_trans[node_id], NULL, 0);
+	if(!scalable_task)
+	{
+		ERROR_LOG("allocate memory error.");
+		return;
+	}
+	amper_post_write(scalable_task, &(server->Salable[node_id].Cdata_mr), server->Salable[node_id].Sdata_mr->addr, size, 0, false);
+	while(!scalable_task->done_flag);
+	_mm_clflush(server->Salable[node_id].Sdata_mr->addr);
+
+	struct dhmp_task* scalable_task2;
+	scalable_task2 = dhmp_write_task_create(server->connect_trans[node_id], NULL, 0);
+	if(!scalable_task2)
+	{
+		ERROR_LOG("allocate memory error.");
+		return;
+	}
+	uint64_t num = 1;
+	amper_post_write(scalable_task2, &(server->Salable[node_id].Creq_mr), &num, sizeof(char), 0, true);
+	while(!scalable_task2->done_flag);
+	return;
+}
+
+void *scalable_run(void* arg1)
+{
+	int node_id = *(int*) arg1;
+	INFO_LOG("start scalable %d epoll", node_id);
+	char * addr = server->Salable[node_id].Sreq_mr->addr;
+	int i = 0;
+	while(1)
+	{
+		if(addr[0] == 1)
+		{
+			INFO_LOG("get new scalable %d message", node_id);
+			amper_scalable_request_handler(node_id, *(size_t*)(addr+1)); 
+			addr[0] == 0;
+		}
+	}
+	return ;
+}
+
+
 void dhmp_server_init()
 {
 	int i,err=0;
@@ -295,6 +340,8 @@ void dhmp_server_init()
 	}
 
 	//##############initial
+	server->client_num = 0;
+
 #ifdef DaRPC_SERVER
 	for(i=0; i<DaRPC_clust_NUM; i++)
 		server->DaRPC_dcq[i] = NULL;
@@ -319,7 +366,9 @@ void dhmp_server_init()
 	pthread_create(&server->model_C_Sread_epoll_thread, NULL, model_C_Sread_run, NULL);
 #endif
 
+#ifdef L5
 	pthread_create(&server->L5_poll_thread, NULL, L5_run, NULL);
+#endif	
 }
 
 void dhmp_server_destroy()
@@ -333,8 +382,14 @@ void dhmp_server_destroy()
 #endif	
 	pthread_join(server->ctx.epoll_thread, NULL);
 
+	int i;
+#ifdef L5
 	pthread_join(server->L5_poll_thread, NULL);
-
+#endif	
+#ifdef scalable
+	for(i =0;i<DHMP_CLIENT_NODE_NUM ;i++)
+		pthread_join(server->scalable_poll_thread[i], NULL);
+#endif
 	INFO_LOG("server destroy end.");
 	free(server);
 }
@@ -344,6 +399,7 @@ void amper_allocspace_for_server(struct dhmp_transport* rdma_trans, int is_speci
 {
 	int node_id = rdma_trans->node_id;
 	struct dhmp_send_mr* temp_smr;
+	void * temp;
 	switch(is_special)
 	{
 		case 3: // L5
@@ -353,7 +409,7 @@ void amper_allocspace_for_server(struct dhmp_transport* rdma_trans, int is_speci
 				server->L5_mailbox.addr = nvm_malloc(DHMP_CLIENT_NODE_NUM*sizeof(char)); // store client num  
 				temp_smr = dhmp_create_smr_per_ops(rdma_trans, server->L5_mailbox.addr, DHMP_CLIENT_NODE_NUM*sizeof(char));
 				server->L5_mailbox.mr = temp_smr->mr;
-				void *temp = nvm_malloc(sizeof(char)); // store client num  
+				temp = nvm_malloc(sizeof(char)); // store client num  
 				temp_smr = dhmp_create_smr_per_ops(rdma_trans, temp, sizeof(char));
 				server->L5_mailbox.read_mr = temp_smr->mr;
 			}
@@ -361,6 +417,7 @@ void amper_allocspace_for_server(struct dhmp_transport* rdma_trans, int is_speci
 			server->L5_message[node_id].addr = nvm_malloc(size);
 			temp_smr = dhmp_create_smr_per_ops(rdma_trans, server->L5_message[node_id].addr, size);
 			server->L5_message[node_id].mr = temp_smr->mr;
+			INFO_LOG("L5 buffer %d %p is ready.",node_id,erver->L5_mailbox.mr->addr);
 			
 		}
 		break;
@@ -370,18 +427,42 @@ void amper_allocspace_for_server(struct dhmp_transport* rdma_trans, int is_speci
 			temp_smr = dhmp_create_smr_per_ops(rdma_trans, server->Tailwind_buffer[node_id].addr, size);
 			server->Tailwind_buffer[node_id].mr = temp_smr->mr;
 
-			void *temp = nvm_malloc(sizeof(char)); 
+			temp = nvm_malloc(sizeof(char)); 
 			temp_smr = dhmp_create_smr_per_ops(rdma_trans, temp, sizeof(char));
 			server->Tailwind_buffer[node_id].read_mr = temp_smr->mr;
 		}
 		break;
 		case 5: // for DaRPC only need once
 		{
-			void *temp = nvm_malloc(sizeof(char)); 
+			temp = nvm_malloc(sizeof(char)); 
 			temp_smr = dhmp_create_smr_per_ops(rdma_trans, temp, sizeof(char));
 			server->read_mr = temp_smr->mr;
 		}
 		break;
+		case 6: // for RFP
+		{
+			temp = nvm_malloc(size); 
+			temp_smr = dhmp_create_smr_per_ops(rdma_trans, temp, size);
+			server->RFP[node_id].write_mr = temp_smr->mr;
+
+			temp = nvm_malloc(size); 
+			temp_smr = dhmp_create_smr_per_ops(rdma_trans, temp, size);
+			server->RFP[node_id].read_mr = temp_smr->mr;
+		}
+		case 7: // for scalable
+		{
+			size_t write_length = sizeof(void *) + sizeof(size_t); // client_addr+req_size
+			size_t totol_length = BATCH * (size + sizeof(void*) + sizeof(size_t) + 1);//(data+remote_addr+size+vaild )* batch
+			temp = nvm_malloc(write_length); 
+			memset(temp, 0 ,write_length);
+			temp_smr = dhmp_create_smr_per_ops(rdma_trans, temp, write_length);
+			server->Salable[node_id].Sreq_mr = temp_smr->mr;
+
+			temp = nvm_malloc(totol_length); 
+			temp_smr = dhmp_create_smr_per_ops(rdma_trans, temp, totol_length);
+			server->Salable[node_id].Sdata_mr = temp_smr->mr;
+			pthread_create(&(server->scalable_poll_thread[node_id]), NULL, scalable_run, &node_id);
+		}
 	};
 	return;
 }

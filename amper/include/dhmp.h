@@ -20,12 +20,13 @@
 #include <rdma/rdma_cma.h>
 #include <numa.h>
 #include "json-c/json.h"
+#include <x86intrin.h> 
 
 #define FLUSH
 
 
 //#define model_B
-#define model_C
+// #define model_C
 
 #define DHMP_SERVER_DRAM_TH ((uint64_t)1024*1024*1024*1)
 
@@ -35,8 +36,16 @@
 
 //#define DaRPC_SERVER
 #define DaRPC_clust_NUM  5
-
 #define BATCH 10
+
+#define octopus
+// #define clover
+// #define L5
+// #define Tailwind
+// #define DaRPC
+// #define scalable
+// #define RFP
+
 
 #define DHMP_DEFAULT_SIZE 256
 #define DHMP_DEFAULT_POLL_TIME 800000000
@@ -116,6 +125,9 @@ struct dhmp_mc_request{
 	size_t req_size;
 	struct dhmp_addr_info *addr_info;
 	bool is_special;
+	struct ibv_mr mr;
+	struct ibv_mr mr2;
+	void * task;
 };
 
 /*dhmp malloc response msg*/
@@ -297,6 +309,9 @@ void dhmp_server_init();
 void dhmp_server_destroy();
 int dhmp_send(void *dhmp_addr, void * local_buf, size_t count, bool is_write);
 
+void * nvm_malloc(size_t size);
+void nvm_free(void *addr);
+
 void model_A_write(void * globle_addr, size_t length, void * local_addr);
 void model_A_writeImm(void * globle_addr, size_t length, void * local_addr);
 void model_B_write(void * globle_addr, size_t length, void * local_addr);
@@ -308,10 +323,10 @@ void model_D_writeImm(void * server_addr, size_t length, void * local_addr);
 void model_D_send(void * server_addr, size_t length, void * local_addr);
 
 void model_1_octopus(void * globle_addr, size_t length, void * local_addr);
-void model_1_clover(void * globle_addr, size_t length, void * local_addr);
-void model_4_RFP(void * globle_addr, size_t length, void * local_addr);
-void model_5_L5(void * globle_addr, size_t length, void * local_addr);
-void model_6_Tailwind(int accessnum, int *rand_num , size_t length, void * local_addr);
+void model_1_clover(void * write_addr, size_t length, void * local_addr, void * cas_addr);
+void model_4_RFP( size_t length, void * local_addr);
+void model_5_L5( size_t length, void * local_addr);
+void model_6_Tailwind(int accessnum, int obj_num,int *rand_num , size_t length, void * local_addr);
 void model_3_DaRPC(int accessnum, int *rand_num ,size_t length, void * local_addr);
 void model_7_scalable(int accessnum, int *rand_num , size_t length, void * local_addr);
 // void model_1_clover(void * globle_addr, size_t length, void * local_addr);

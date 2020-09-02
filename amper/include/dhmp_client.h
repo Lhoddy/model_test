@@ -56,7 +56,7 @@ struct dhmp_client{
 
 	struct{
 		struct ibv_mr mailbox_mr;
-		char num_1;
+		uint64_t num_1;
 		struct ibv_mr message_mr;
 		struct ibv_mr read_mr;
 	}L5;
@@ -66,8 +66,21 @@ struct dhmp_client{
 		struct ibv_mr read_mr;
 	}Tailwind_buffer;
 
-	struct ibv_mr* read_mr;
+	struct ibv_mr read_mr;
 	pthread_mutex_t mutex_request_num;
+	int para_request_num;
+
+	struct{
+		struct ibv_mr write_mr;
+		struct ibv_mr read_mr;
+	}RFP;
+
+	struct{
+		struct ibv_mr Sreq_mr;
+		struct ibv_mr Sdata_mr;
+		struct ibv_mr* Creq_mr;
+		struct ibv_mr* Cdata_mr;
+	}Salable;
 };
 
 extern struct dhmp_client *client;

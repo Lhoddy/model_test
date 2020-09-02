@@ -65,9 +65,10 @@ struct dhmp_server{
 	pthread_t model_C_Sread_epoll_thread;
 	bool model_C_new_msg;
 
+	int client_num;
+
 	struct  {
 		struct ibv_mr* mr;
-		int client_num;
 		void * addr;
 		struct ibv_mr* read_mr;
 	} L5_mailbox;
@@ -75,7 +76,7 @@ struct dhmp_server{
 		struct ibv_mr* mr;
 		void * addr;
 	} L5_message[DHMP_CLIENT_NODE_NUM]; 
-	pthread_t L5_epoll_thread;
+	pthread_t L5_poll_thread;
 
 	struct  {
 		struct ibv_mr* mr;
@@ -86,11 +87,23 @@ struct dhmp_server{
 	struct  {
 		struct ibv_mr* mr;
 		void * addr;
-		struct ibv_mr* read_mr;
 	} herd_buffer[DHMP_CLIENT_NODE_NUM];
 
 	struct ibv_mr* read_mr;
 	struct dhmp_cq* DaRPC_dcq[DaRPC_clust_NUM];
+
+	struct{
+		struct ibv_mr* write_mr;
+		struct ibv_mr* read_mr;
+	}RFP[DHMP_CLIENT_NODE_NUM];
+
+	struct{
+		struct ibv_mr* Sreq_mr;
+		struct ibv_mr* Sdata_mr;
+		struct ibv_mr Creq_mr;
+		struct ibv_mr Cdata_mr;
+	}Salable[DHMP_CLIENT_NODE_NUM];
+	pthread_t scalable_poll_thread[DHMP_CLIENT_NODE_NUM];
 };
 
 extern struct dhmp_server *server;

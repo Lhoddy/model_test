@@ -44,9 +44,18 @@ struct amper_DaRPC_work{
 struct amper_scalable_work{
 	struct dhmp_transport *rdma_trans;
 	size_t length;
+	int write_type;
 	bool done_flag;
 };
 
+struct dhmp_RFP_work{
+	struct dhmp_transport *rdma_trans;
+	void *local_addr;
+	size_t length;
+	bool done_flag;
+	struct ibv_mr* remote_mr;
+	bool is_write;
+};
 
 struct dhmp_rw2_work{
 	struct dhmp_transport *rdma_trans;
@@ -65,6 +74,7 @@ struct dhmp_malloc_work{
 	size_t length;
 	bool done_flag;
 	int is_special; // 1 = ringbuffer ;2 = clover
+	bool recv_flag;
 };
 
 struct dhmp_free_work{
@@ -163,7 +173,13 @@ enum dhmp_work_type{
 	DHMP_WORK_WRITEIMM3,
 	DHMP_WORK_SREAD,
 	DHMP_WORK_WRITE2,
-	AMPER_WORK_L5
+	AMPER_WORK_L5,
+	AMPER_WORK_CLOVER,
+	AMPER_WORK_scalable,
+	AMPER_WORK_Tailwind,
+	AMPER_WORK_Tailwind_RPC,
+	AMPER_WORK_DaRPC,
+	AMPER_WORK_RFP
 };
 
 

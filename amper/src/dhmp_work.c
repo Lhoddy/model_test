@@ -10,7 +10,7 @@
 #include "dhmp_client.h"
 #include "dhmp_server.h"
 
-int amper_post_write(struct dhmp_task* task, struct ibv_mr* rmr, uint64_t* sge_addr, uint32_t sge_length,uint32_t sge_lkey ,bool is_inline)
+int amper_post_write(struct dhmp_task* task, struct ibv_mr* rmr, uint64_t* sge_addr, uint32_t sge_length, uint32_t sge_lkey ,bool is_inline)
 {
 	struct ibv_send_wr send_wr,*bad_wr=NULL;
 	struct ibv_sge sge;
@@ -29,7 +29,7 @@ int amper_post_write(struct dhmp_task* task, struct ibv_mr* rmr, uint64_t* sge_a
 	sge.addr= ( uintptr_t ) sge_addr;
 	sge.length=sge_length;
 	sge.lkey=sge_lkey;
-	err=ibv_post_send ( rdma_trans->qp, &send_wr, &bad_wr );
+	int err=ibv_post_send ( task->rdma_trans->qp, &send_wr, &bad_wr );
 	if ( err )
 	{
 		ERROR_LOG("ibv_post_send error");
@@ -60,7 +60,7 @@ int amper_post_read(struct dhmp_task* task, struct ibv_mr* rmr, uint64_t* sge_ad
 	sge.addr= ( uintptr_t ) sge_addr;
 	sge.length=sge_length;
 	sge.lkey=sge_lkey;
-	err=ibv_post_send ( rdma_trans->qp, &send_wr, &bad_wr );
+	int err=ibv_post_send ( task->rdma_trans->qp, &send_wr, &bad_wr );
 	if ( err )
 	{
 		ERROR_LOG("ibv_post_send error");
@@ -128,6 +128,13 @@ void dhmp_malloc_work_handler(struct dhmp_work *work)
 	req_msg.req_size=malloc_work->length;
 	req_msg.addr_info=malloc_work->addr_info;
 	req_msg.is_special=malloc_work->is_special;
+	req_msg.task = malloc_work;
+
+	if(malloc_work->is_special == 7)  // for scalale
+	{
+		memcpy(&(req_msg.mr) , client->Salable.Creq_mr, sizeof(struct ibv_mr)); 
+		memcpy(&(req_msg.mr2) , client->Salable.Cdata_mr, sizeof(struct ibv_mr)); 
+	}
 	
 	msg.msg_type=DHMP_MSG_MALLOC_REQUEST;
 	msg.data_size=sizeof(struct dhmp_mc_request);
@@ -136,9 +143,9 @@ void dhmp_malloc_work_handler(struct dhmp_work *work)
 	dhmp_post_send(malloc_work->rdma_trans, &msg);
 
 	/*wait for the server return result*/
-	while(malloc_work->addr_info->nvm_mr.length==0);
+	while(malloc_work->recv_flag==false);
 	if(malloc_work->is_special)
-	goto end;	
+		goto end;	
 	
 	res_addr=malloc_work->addr_info->nvm_mr.addr;
 	
@@ -304,7 +311,7 @@ out:
 	wwork->done_flag=true;
 }
 
-void amper_clover_work_handler(struct dhmp_work *work)
+int amper_clover_work_handler(struct dhmp_work *work)
 {
 	struct dhmp_addr_info *addr_info;
 	struct amper_clover_work *wwork;
@@ -331,7 +338,7 @@ void amper_clover_work_handler(struct dhmp_work *work)
 	int err=0;
 	struct ibv_mr* mr = &(addr_info->nvm_mr);
 
-	clover_task = dhmp_write_task_create(wwork->rdma_trans, NULL, wwork->length);
+	clover_task = dhmp_write_task_create(wwork->rdma_trans, NULL, 0);
 	if(!clover_task)
 	{
 		ERROR_LOG("allocate memory error.");
@@ -361,7 +368,61 @@ out:
 	wwork->done_flag=true;
 }
 
-void amper_L5_work_handler(struct dhmp_work *work)   /// same as two write
+
+int amper_scalable_work_handler(struct dhmp_work *work) 
+{
+	struct amper_scalable_work *wwork = (struct amper_scalable_work *)work->work_data;
+	int err=0;
+
+	struct dhmp_task* scalable_task;
+	struct dhmp_task* scalable_task2;
+	// client->per_ops_mr = Sreq_mr ;client->per_ops_mr2 = Sdata_mr  
+	if(wwork->write_type == 1)
+	{
+		scalable_task = dhmp_write_task_create(wwork->rdma_trans, client->per_ops_mr, wwork->length);
+		if(!scalable_task)
+		{
+			ERROR_LOG("allocate memory error.");
+			return -1;
+		}
+		amper_post_write(scalable_task, &client->Salable.Sreq_mr, scalable_task->sge.addr, scalable_task->sge.length, scalable_task->sge.lkey, false);
+		
+		
+		scalable_task2 = dhmp_read_task_create(wwork->rdma_trans, client->per_ops_mr2, sizeof(char));
+		if(!scalable_task2)
+		{
+			ERROR_LOG("allocate memory error.");
+			return -1;
+		}
+		amper_post_read(scalable_task2, &client->Salable.Sreq_mr, scalable_task2->sge.addr, 0, 0, false);
+	}
+	else
+	{
+		scalable_task = dhmp_write_task_create(wwork->rdma_trans, client->per_ops_mr2, wwork->length);
+		if(!scalable_task)
+		{
+			ERROR_LOG("allocate memory error.");
+			return -1;
+		}
+		amper_post_write(scalable_task, &client->Salable.Sdata_mr, scalable_task->sge.addr, scalable_task->sge.length, scalable_task->sge.lkey, false);
+		
+		
+		scalable_task2 = dhmp_read_task_create(wwork->rdma_trans, client->per_ops_mr, sizeof(char));
+		if(!scalable_task2)
+		{
+			ERROR_LOG("allocate memory error.");
+			return -1;
+		}
+		amper_post_read(scalable_task2, &client->Salable.Sdata_mr, scalable_task2->sge.addr, 0, 0, false);
+	}
+	while(!scalable_task->done_flag);	
+	while(!scalable_task2->done_flag);
+out:
+	wwork->done_flag=true;
+}
+
+
+int amper_L5_work_handler(struct dhmp_work *work)   /// same as two write
 {
 	struct amper_L5_work *wwork;
 	wwork=(struct amper_L5_work *)work->work_data;
@@ -369,14 +430,14 @@ void amper_L5_work_handler(struct dhmp_work *work)   /// same as two write
 
 	struct dhmp_task* L5_task;
 	memcpy(client->per_ops_mr_addr, wwork->local_addr, wwork->length);
-	temp_mr = client->per_ops_mr;
+	struct dhmp_send_mr* temp_mr = client->per_ops_mr;
 	L5_task = dhmp_write_task_create(wwork->rdma_trans, temp_mr, wwork->length);
 	if(!L5_task)
 	{
 		ERROR_LOG("allocate memory error.");
 		return -1;
 	}
-	amper_post_write(L5_task, client->L5.message_mr, L5_task->sge.addr, L5_task->sge.length, L5_task->sge.lkey, false);
+	amper_post_write(L5_task, &client->L5.message_mr, L5_task->sge.addr, L5_task->sge.length, L5_task->sge.lkey, false);
 	
 	struct dhmp_task* L5_task3;
 	L5_task3 = dhmp_write_task_create(wwork->rdma_trans, NULL, sizeof(char));
@@ -385,16 +446,16 @@ void amper_L5_work_handler(struct dhmp_work *work)   /// same as two write
 		ERROR_LOG("allocate memory error.");
 		return -1;
 	}
-	amper_post_write(L5_task3, client->L5.read_mr, &(client->L5.num_1), sizeof(char), 0, true);
+	amper_post_write(L5_task3, &client->L5.read_mr, &(client->L5.num_1), sizeof(char), 0, true);
 
 	struct dhmp_task* L5_task2;
-	L5_task2=dhmp_write_task_create(rdma_trans, NULL, length);
+	L5_task2=dhmp_write_task_create(wwork->rdma_trans, NULL, wwork->length);
 	if ( !L5_task2 )
 	{
 		ERROR_LOG ( "allocate memory error." );
 		return -1;
 	}
-	amper_post_write(L5_task2, client->L5.mailbox_mr, &(client->L5.num_1), sizeof(char), 0, true);
+	amper_post_write(L5_task2, &client->L5.mailbox_mr, &(client->L5.num_1), sizeof(char), 0, true);
 
 
 	while(!L5_task3->done_flag); // read after 2th write
@@ -405,7 +466,7 @@ void amper_L5_work_handler(struct dhmp_work *work)   /// same as two write
 		ERROR_LOG("allocate memory error.");
 		return -1;
 	}
-	amper_post_read(L5_task4, client->L5.read_mr, L5_task4->sge.addr, 0, L5_task4->sge.lkey, false);
+	amper_post_read(L5_task4, &client->L5.read_mr, L5_task4->sge.addr, 0, L5_task4->sge.lkey, false);
 
 	while(!L5_task->done_flag);	
 	while(!L5_task2->done_flag);
@@ -426,7 +487,7 @@ void amper_Tailwind_RPC_work_handler(struct dhmp_work *work)
 
 	/*build malloc request msg*/
 	req_msg.req_size=wwork->length;
-	req_msg.dhmp_addr = ( uintptr_t ) client->Tailwind_buffer.mr->addr + wwork->offset;
+	req_msg.dhmp_addr = ( void * ) (client->Tailwind_buffer.mr.addr + wwork->offset);
 	req_msg.task = wwork;
 
 	msg.msg_type=DHMP_MSG_Tailwind_RPC_requeset ;
@@ -444,7 +505,7 @@ void amper_Tailwind_RPC_work_handler(struct dhmp_work *work)
 	wwork->done_flag=true;
 }
 
-void amper_Tailwind_work_handler(struct dhmp_work *work)  
+int amper_Tailwind_work_handler(struct dhmp_work *work)  
 {
 	struct amper_Tailwind_work *wwork;
 	wwork=(struct amper_Tailwind_work *)work->work_data;
@@ -470,14 +531,14 @@ void amper_Tailwind_work_handler(struct dhmp_work *work)
 	send_wr.sg_list=&sge;
 	send_wr.num_sge=1;
 	send_wr.send_flags=IBV_SEND_SIGNALED;
-	send_wr.wr.rdma.remote_addr= ( uintptr_t ) client->Tailwind_buffer.mr->addr + wwork->offset;
-	send_wr.wr.rdma.rkey= client->Tailwind_buffer.mr->rkey;
+	send_wr.wr.rdma.remote_addr = ( uintptr_t ) (client->Tailwind_buffer.mr.addr + wwork->offset);
+	send_wr.wr.rdma.rkey= client->Tailwind_buffer.mr.rkey;
 
 	sge.addr= ( uintptr_t ) Tailwind_task->sge.addr;
 	sge.length=Tailwind_task->sge.length;
 	sge.lkey=Tailwind_task->sge.lkey;
 
-	err=ibv_post_send ( rdma_trans->qp, &send_wr, &bad_wr );
+	err=ibv_post_send ( wwork->rdma_trans->qp, &send_wr, &bad_wr );
 	if ( err )
 	{
 		ERROR_LOG("ibv_post_send error");
@@ -492,7 +553,7 @@ void amper_Tailwind_work_handler(struct dhmp_work *work)
 		ERROR_LOG("allocate memory error.");
 		return -1;
 	}
-	amper_post_read(Tailwind_task2, client->Tailwind_buffer.read_mr, Tailwind_task2->sge.addr, 0, 0, false);
+	amper_post_read(Tailwind_task2, &client->Tailwind_buffer.read_mr, Tailwind_task2->sge.addr, 0, 0, false);
 
 	while(!Tailwind_task->done_flag);
 	while(!Tailwind_task2->done_flag);			
@@ -500,7 +561,7 @@ out:
 	wwork->done_flag=true;
 }
 
-void amper_DaRPC_work_handler(struct dhmp_work *work) 
+int amper_DaRPC_work_handler(struct dhmp_work *work) 
 {
 	struct amper_DaRPC_work *wwork;
 	wwork=(struct amper_DaRPC_work *)work->work_data;
@@ -527,12 +588,64 @@ void amper_DaRPC_work_handler(struct dhmp_work *work)
 		ERROR_LOG("allocate memory error.");
 		return -1;
 	}
-	amper_post_read(DaRPC_task, client->read_mr, DaRPC_task->sge.addr, 0, 0, false);
+	amper_post_read(DaRPC_task, &client->read_mr, DaRPC_task->sge.addr, 0, 0, false);
 
 	/*wait for the server return result*/
-	// while(!wwork->recv_flag);
+	// while(!wwork->recv_flag);   //not wait recv here  ,wait for mutex_num-limit
 	wwork->done_flag=true;
 }
+
+
+int amper_RFP_work_handler(struct dhmp_work *work)  
+{
+	struct dhmp_RFP_work *wwork;
+	wwork=(struct dhmp_RFP_work *)work->work_data;
+	struct dhmp_send_mr* temp_mr=NULL;
+	int err=0;
+	memcpy(client->per_ops_mr_addr, wwork->local_addr, wwork->length);
+	temp_mr=client->per_ops_mr;
+	struct dhmp_task* RFP_task;
+
+	if(wwork->is_write == true)
+	{
+		RFP_task=dhmp_write_task_create(wwork->rdma_trans, temp_mr, wwork->length);
+		if(!RFP_task)
+		{
+			ERROR_LOG("allocate memory error.");
+			return -1;
+		}
+		amper_post_write(RFP_task, wwork->remote_mr, RFP_task->sge.addr, RFP_task->sge.length, RFP_task->sge.lkey, false);
+
+		struct dhmp_task* RFP_task2;
+		RFP_task2 = dhmp_read_task_create(wwork->rdma_trans, client->per_ops_mr2, sizeof(char));
+		if(!RFP_task2)
+		{
+			ERROR_LOG("allocate memory error.");
+			return -1;
+		}
+		amper_post_read(RFP_task2, wwork->remote_mr, RFP_task->sge.addr, 0, 0, false);
+
+		while(!RFP_task->done_flag);
+		while(!RFP_task2->done_flag);
+	}
+	else
+	{
+		RFP_task=dhmp_read_task_create(wwork->rdma_trans, temp_mr, wwork->length);
+		if(!RFP_task)
+		{
+			ERROR_LOG("allocate memory error.");
+			return -1;
+		}
+		amper_post_read(RFP_task, wwork->remote_mr, RFP_task->sge.addr, RFP_task->sge.length, RFP_task->sge.lkey, false);
+		while(!RFP_task->done_flag);
+
+		//not retry
+	}
+				
+out:
+	wwork->done_flag=true;
+}
+
 
 
 void dhmp_write2_work_handler(struct dhmp_work *work)
@@ -839,6 +952,9 @@ void *dhmp_work_handle_thread(void *data)
 				case AMPER_WORK_L5:
 					amper_L5_work_handler(work);
 					break;
+				case AMPER_WORK_scalable:
+					amper_scalable_work_handler(work);
+					break;
 				case AMPER_WORK_Tailwind:
 					amper_Tailwind_work_handler(work);
 					break;	
@@ -847,6 +963,9 @@ void *dhmp_work_handle_thread(void *data)
 					break;
 				case AMPER_WORK_DaRPC:
 					amper_DaRPC_work_handler(work);
+					break;
+				case AMPER_WORK_RFP:
+					amper_RFP_work_handler(work);
 					break;
 				case DHMP_WORK_WRITE:
 					dhmp_write_work_handler(work);
