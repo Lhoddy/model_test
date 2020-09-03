@@ -1113,22 +1113,28 @@ void model_7_scalable(int accessnum, int *rand_num , size_t length, void * local
 {
 	int i = 0;
 	size_t write_length = sizeof(void *) + sizeof(size_t); // client_addr+req_size
-	char * scalable_write_data = client->per_ops_mr_addr;
+	int * scalable_write_data = client->per_ops_mr_addr;
 
 	size_t totol_length = BATCH * (length + sizeof(void*) + sizeof(size_t) + 1);//(data+remote_addr+size+vaild )* batch
 	char * scalable_request_data = client->per_ops_mr_addr2;
 
-	scalable_write_data[0] = 1;
-	memcpy(scalable_write_data + sizeof(char) , &totol_length, sizeof(size_t));
+	memcpy(scalable_write_data + sizeof(int) , &totol_length, sizeof(size_t));
 
 	for(;i < accessnum; i= i+BATCH)
 	{
-		scalable_request_data[0] = 1;		
+		scalable_write_data[0] = i;		
 		amper_scalable(write_length ,1); //  write + read & write
-		while(scalable_request_data[0] == 1);
-		// scalable_request_data[0] = 1;
-		amper_scalable(totol_length ,2); //  write + write
-		// while(scalable_request_data[0] == 1);
+		// int retry = 0;
+		while((int)(scalable_write_data[0]));
+		// {
+		// 	retry++;
+		// 	if(retry == 100)
+		// 	{
+		// 		amper_scalable(write_length ,1); //??????
+		// 		retry = 0;
+		// 	}
+		// }
+		amper_scalable(totol_length ,2); //  write 
 	}
 	
 }

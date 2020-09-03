@@ -3,13 +3,13 @@
 #include "dhmp.h"
 #define  obj_num_max  1005
 
-// #define octopus 0.5
-// #define clover  0.5
-// #define L5  1
-// #define Tailwind  1
-// #define DaRPC   1
+// #define octopus 
+// #define clover  
+// #define L5  
+// #define Tailwind  
+// #define DaRPC   
 // #define scalable
-// #define RFP   1
+// #define RFP   
 
 const double A = 1.3;  
 const double C = 1.0;  
@@ -131,7 +131,7 @@ int main(int argc,char *argv[])
 	
 #endif
 #ifdef scalable
-	dhmp_malloc(0,7); //scalable
+	dhmp_malloc(size,7); //scalable
 	model_7_scalable(accessnum, rand_num, size, str);
 	
 #endif

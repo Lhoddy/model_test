@@ -328,9 +328,9 @@ int amper_clover_work_handler(struct dhmp_work *work)
 	}
 
 	/*check no the same addr write task in qp*/
-	while(addr_info->write_flag);
-	addr_info->write_flag=true;
-	++addr_info->write_cnt;
+	// while(addr_info->write_flag);
+	// addr_info->write_flag=true;
+	// ++addr_info->write_cnt;
 
 	struct dhmp_task* clover_task;
 	struct ibv_send_wr send_wr,*bad_wr=NULL;
@@ -348,13 +348,17 @@ int amper_clover_work_handler(struct dhmp_work *work)
 	memset(&send_wr, 0, sizeof(struct ibv_send_wr));
 	send_wr.wr_id= ( uintptr_t ) clover_task;
 	send_wr.opcode=IBV_WR_ATOMIC_CMP_AND_SWP;
-	send_wr.sg_list=NULL;
-	send_wr.num_sge=0;
+	send_wr.sg_list= &sge;
+	send_wr.num_sge=1;
 	send_wr.send_flags=IBV_SEND_SIGNALED;
 	send_wr.wr.atomic.remote_addr= ( uintptr_t ) mr->addr;
 	send_wr.wr.atomic.rkey=mr->rkey;
 	send_wr.wr.atomic.compare_add = 0ULL;
 	send_wr.wr.atomic.swap = 0ULL;
+
+	sge.addr= (uint64_t)client->per_ops_mr->mr->addr;
+	sge.length= 8; 
+	sge.lkey= client->per_ops_mr->mr->lkey;
 
 	err=ibv_post_send ( wwork->rdma_trans->qp, &send_wr, &bad_wr );
 	if ( err )
@@ -407,7 +411,7 @@ int amper_scalable_work_handler(struct dhmp_work *work)
 		amper_post_write(scalable_task, &client->Salable.Sdata_mr, scalable_task->sge.addr, scalable_task->sge.length, scalable_task->sge.lkey, false);
 		
 		
-		scalable_task2 = dhmp_read_task_create(wwork->rdma_trans, client->per_ops_mr, sizeof(char));
+		scalable_task2 = dhmp_read_task_create(wwork->rdma_trans, client->per_ops_mr2, sizeof(char));
 		if(!scalable_task2)
 		{
 			ERROR_LOG("allocate memory error.");

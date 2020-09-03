@@ -89,8 +89,10 @@ struct dhmp_task* dhmp_read_task_create(struct dhmp_transport* rdma_trans,
 	
 	read_task->done_flag=false;
 	read_task->rdma_trans=rdma_trans;
-	read_task->sge.addr=smr->mr->addr;
 	read_task->sge.length=length;
+	if(smr == NULL)
+		return read_task;
+	read_task->sge.addr=smr->mr->addr;
 	read_task->sge.lkey=smr->mr->lkey;
 	read_task->smr=smr;
 

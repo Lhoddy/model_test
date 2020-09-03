@@ -347,6 +347,7 @@ static void dhmp_malloc_request_handler(struct dhmp_transport* rdma_trans,
 	}
 	else if(response.req_info.is_special == 7)// for scalable
 	{
+		amper_allocspace_for_server(rdma_trans, 7, response.req_info.req_size); 
 		memcpy(&(server->Salable[rdma_trans->node_id].Creq_mr), &(response.req_info.mr) , sizeof(struct ibv_mr));
 		memcpy(&(server->Salable[rdma_trans->node_id].Cdata_mr), &(response.req_info.mr2) , sizeof(struct ibv_mr));
 		memcpy(&(response.mr), server->Salable[rdma_trans->node_id].Sreq_mr, sizeof(struct ibv_mr));
@@ -815,6 +816,9 @@ static void dhmp_wc_success_handler(struct ibv_wc* wc)
 		case IBV_WC_RDMA_READ:
 			task_ptr->done_flag=true;
 			break;
+		case IBV_WC_COMP_SWAP:
+			task_ptr->done_flag=true;
+			break;
 		default:
 			ERROR_LOG("unknown opcode:%s",
 			            dhmp_wc_opcode_str(wc->opcode));
@@ -830,8 +834,8 @@ static void dhmp_wc_error_handler(struct ibv_wc* wc)
 	if(wc->status==IBV_WC_WR_FLUSH_ERR)
 		INFO_LOG("work request flush");
 	else
-		ERROR_LOG("wc status is [%s]",
-		            ibv_wc_status_str(wc->status));
+		ERROR_LOG("wc status is [%s] %s",
+		            ibv_wc_status_str(wc->status),dhmp_wc_opcode_str(wc->opcode));
 }
 
 /**
@@ -1635,7 +1639,7 @@ struct dhmp_send_mr* dhmp_create_smr_per_ops(struct dhmp_transport* rdma_trans, 
 	}
 	
 	res->mr=ibv_reg_mr(rdma_trans->device->pd,
-						addr, length, IBV_ACCESS_LOCAL_WRITE|IBV_ACCESS_REMOTE_READ|IBV_ACCESS_REMOTE_WRITE);
+						addr, length, IBV_ACCESS_LOCAL_WRITE|IBV_ACCESS_REMOTE_READ|IBV_ACCESS_REMOTE_WRITE | IBV_ACCESS_REMOTE_ATOMIC);
 	if(!res->mr)
 	{
 		ERROR_LOG("ibv register memory error.");

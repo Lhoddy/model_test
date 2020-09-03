@@ -126,7 +126,7 @@ struct dhmp_area *dhmp_area_create(bool has_buddy_sys,size_t length)
 				addr, length, 
 				IBV_ACCESS_LOCAL_WRITE|
 				IBV_ACCESS_REMOTE_READ|
-				IBV_ACCESS_REMOTE_WRITE);
+				IBV_ACCESS_REMOTE_WRITE|IBV_ACCESS_REMOTE_ATOMIC);
 	if(!mr)
 	{
 		ERROR_LOG("ib register mr error.");
@@ -188,7 +188,8 @@ struct ibv_mr * dhmp_malloc_poll_area(size_t length)
 				addr, length, 
 				IBV_ACCESS_LOCAL_WRITE|
 				IBV_ACCESS_REMOTE_READ|
-				IBV_ACCESS_REMOTE_WRITE);
+				IBV_ACCESS_REMOTE_WRITE|
+				IBV_ACCESS_REMOTE_ATOMIC);
 	if(!mr)
 	{
 		ERROR_LOG("ib register mr error.");
@@ -255,7 +256,7 @@ void amper_scalable_request_handler(int node_id, size_t size)
 		ERROR_LOG("allocate memory error.");
 		return;
 	}
-	amper_post_write(scalable_task, &(server->Salable[node_id].Cdata_mr), server->Salable[node_id].Sdata_mr->addr, size, 0, false);
+	amper_post_read(scalable_task, &(server->Salable[node_id].Cdata_mr), server->Salable[node_id].Sdata_mr->addr, size, server->Salable[node_id].Sdata_mr->lkey, false);
 	while(!scalable_task->done_flag);
 	_mm_clflush(server->Salable[node_id].Sdata_mr->addr);
 
@@ -266,8 +267,8 @@ void amper_scalable_request_handler(int node_id, size_t size)
 		ERROR_LOG("allocate memory error.");
 		return;
 	}
-	uint64_t num = 1;
-	amper_post_write(scalable_task2, &(server->Salable[node_id].Creq_mr), &num, sizeof(char), 0, true);
+	uint64_t num = 0;
+	amper_post_write(scalable_task2, &(server->Salable[node_id].Creq_mr), &num, sizeof(uint64_t), 0, true);
 	while(!scalable_task2->done_flag);
 	return;
 }
@@ -276,15 +277,16 @@ void *scalable_run(void* arg1)
 {
 	int node_id = *(int*) arg1;
 	INFO_LOG("start scalable %d epoll", node_id);
-	char * addr = server->Salable[node_id].Sreq_mr->addr;
+	int * addr = server->Salable[node_id].Sreq_mr->addr;
 	int i = 0;
 	while(1)
 	{
-		if(addr[0] == 1)
+		if((int)addr[0])
 		{
-			INFO_LOG("get new scalable %d message", node_id);
-			amper_scalable_request_handler(node_id, *(size_t*)(addr+1)); 
-			addr[0] == 0;
+			addr[0] = 0;
+			INFO_LOG("get new scalable %d message", (int)addr[0]);
+			amper_scalable_request_handler(node_id, *(size_t*)(addr+4)); 
+			
 		}
 	}
 	return ;
@@ -345,7 +347,6 @@ void dhmp_server_init()
 #ifdef DaRPC_SERVER
 	for(i=0; i<DaRPC_clust_NUM; i++)
 		server->DaRPC_dcq[i] = NULL;
-	amper_allocspace_for_server(server->listen_trans, 5, 0); // DaRPC
 #endif
 	server->L5_mailbox.addr == NULL;
 
@@ -451,7 +452,7 @@ void amper_allocspace_for_server(struct dhmp_transport* rdma_trans, int is_speci
 		}
 		case 7: // for scalable
 		{
-			size_t write_length = sizeof(void *) + sizeof(size_t); // client_addr+req_size
+			size_t write_length = sizeof(void *) + sizeof(size_t); // client_addr+req_size  
 			size_t totol_length = BATCH * (size + sizeof(void*) + sizeof(size_t) + 1);//(data+remote_addr+size+vaild )* batch
 			temp = nvm_malloc(write_length); 
 			memset(temp, 0 ,write_length);
