@@ -284,7 +284,7 @@ static void dhmp_send_response_handler(struct dhmp_transport* rdma_trans,struct 
 	{
 		memcpy(response_msg.req_info.local_addr ,
 			 (msg->data+sizeof(struct dhmp_Send_response)),response_msg.req_info.req_size);
-}
+	}
 
 	struct dhmp_Send_work * task = response_msg.req_info.task;
 	task->recv_flag = true;
@@ -835,7 +835,7 @@ static void dhmp_wc_error_handler(struct ibv_wc* wc)
 		INFO_LOG("work request flush");
 	else
 		ERROR_LOG("wc status is [%s] %s",
-		            ibv_wc_status_str(wc->status),dhmp_wc_opcode_str(wc->opcode));
+		            ibv_wc_status_str(wc->status));
 }
 
 /**
@@ -947,6 +947,48 @@ cleanhcq:
 	return NULL;
 }
 
+static int amper_ud_qp_create(struct dhmp_transport* rdma_trans)
+{
+	int retval=0;
+	struct ibv_qp_init_attr qp_init_attr;
+	struct dhmp_cq* dcq;
+	dcq=dhmp_cq_get(rdma_trans->device, rdma_trans->ctx);
+	if(!dcq)
+	{
+		ERROR_LOG("dhmp cq get error.");
+		return -1;
+	}
+	memset(&qp_init_attr,0,sizeof(qp_init_attr));
+	qp_init_attr.qp_context=rdma_trans;
+	qp_init_attr.qp_type=IBV_QPT_UD;
+	qp_init_attr.send_cq=dcq->cq;
+	qp_init_attr.recv_cq=dcq->cq;
+
+	qp_init_attr.cap.max_send_wr=15000;
+	qp_init_attr.cap.max_send_sge=1;
+
+	qp_init_attr.cap.max_recv_wr=15000;
+	qp_init_attr.cap.max_recv_sge=1;
+
+	retval=rdma_create_qp(rdma_trans->cm_id,
+	                        rdma_trans->device->pd,
+	                        &qp_init_attr);
+	if(retval)
+	{
+		ERROR_LOG("rdma create qp error.");
+		goto cleanhcq;
+	}
+
+	rdma_trans->qp=rdma_trans->cm_id->qp;
+	rdma_trans->dcq=dcq;
+
+	return retval;
+
+cleanhcq:
+	free(dcq);
+	return retval;
+}
+
 /*
  *	create the qp resource for the RDMA connection
  */
@@ -1032,6 +1074,41 @@ static int on_cm_addr_resolved(struct rdma_cm_event* event, struct dhmp_transpor
 		return retval;
 	}
 
+	return retval;
+}
+
+static int on_ud_cm_route_resolved(struct rdma_cm_event* event, struct dhmp_transport* rdma_trans)
+{
+	struct rdma_conn_param conn_param;
+	int i, retval=0;
+
+	retval=amper_ud_qp_create(rdma_trans);
+	if(retval)
+	{
+		ERROR_LOG("hmr qp create error.");
+		return retval;
+	}
+
+	memset(&conn_param, 0, sizeof(conn_param));
+	conn_param.retry_count=100;
+	conn_param.rnr_retry_count=200;
+	conn_param.responder_resources = 1;
+	conn_param.initiator_depth = 1;
+
+	retval=rdma_connect(rdma_trans->cm_id, &conn_param);
+	if(retval)
+	{
+		ERROR_LOG("rdma connect error.");
+		goto cleanqp;
+	}
+
+	dhmp_post_all_recv(rdma_trans);
+	return retval;
+
+cleanqp:
+	dhmp_qp_release(rdma_trans);
+	rdma_trans->ctx->stop=1;
+	rdma_trans->trans_state=DHMP_TRANSPORT_STATE_ERROR;
 	return retval;
 }
 
@@ -1253,10 +1330,18 @@ static int dhmp_handle_ec_event(struct rdma_cm_event* event)
 			retval=on_cm_addr_resolved(event, rdma_trans);
 			break;
 		case RDMA_CM_EVENT_ROUTE_RESOLVED:
+#ifdef UD
+			retval = on_ud_cm_route_resolved(event,rdma_trans);
+#else
 			retval=on_cm_route_resolved(event, rdma_trans);
+#endif
 			break;
 		case RDMA_CM_EVENT_CONNECT_REQUEST:
+#ifdef UD
+			retval=on_ud_cm_connect_request(event,rdma_trans);
+#else
 			retval=on_cm_connect_request(event,rdma_trans);
+#endif
 			break;
 		case RDMA_CM_EVENT_ESTABLISHED:
 			retval=on_cm_established(event,rdma_trans);
