@@ -61,6 +61,10 @@ struct dhmp_transport{
 	long nvm_used_size;
 	
 	struct list_head client_entry;
+
+	struct ibv_ah * ah;
+	uint32_t qp_num;
+	uint32_t qkey;
 };
 
 struct dhmp_send_mr{
@@ -108,5 +112,8 @@ void amper_tailwindRPC_request_handler(struct dhmp_transport* rdma_trans, struct
 void amper_tailwindRPC_response_handler(struct dhmp_transport* rdma_trans, struct dhmp_msg* msg);
 void amper_DaRPC_request_handler(struct dhmp_transport* rdma_trans, struct dhmp_msg* msg);
 void amper_DaRPC_response_handler(struct dhmp_transport* rdma_trans, struct dhmp_msg* msg);
+
+void amper_UD_request_handler(struct dhmp_transport* rdma_trans, struct dhmp_msg* msg);
+void amper_UD_response_handler(struct dhmp_transport* rdma_trans, struct dhmp_msg* msg);
 #endif
 

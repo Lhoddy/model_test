@@ -179,7 +179,8 @@ enum dhmp_work_type{
 	AMPER_WORK_Tailwind,
 	AMPER_WORK_Tailwind_RPC,
 	AMPER_WORK_DaRPC,
-	AMPER_WORK_RFP
+	AMPER_WORK_RFP,
+	AMPER_WORK_UD
 };
 
 
@@ -187,6 +188,14 @@ struct dhmp_work{
 	enum dhmp_work_type work_type;
 	void *work_data;
 	struct list_head work_entry;
+};
+
+struct dhmp_UD_work{
+	struct dhmp_transport *rdma_trans;
+	size_t length;
+	void * local_buf;
+	bool recv_flag;
+	bool done_flag;
 };
 
 void *dhmp_work_handle_thread(void *data);

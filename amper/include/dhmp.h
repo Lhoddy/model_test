@@ -38,7 +38,9 @@
 #define DaRPC_clust_NUM  5
 #define BATCH 10
 
-#define octopus
+#define UD
+
+// #define octopus
 // #define clover
 // #define L5
 // #define Tailwind
@@ -95,7 +97,9 @@ enum dhmp_msg_type{
 	DHMP_MSG_Tailwind_RPC_requeset,
 	DHMP_MSG_Tailwind_RPC_response,
 	DHMP_MSG_DaRPC_requeset,
-	DHMP_MSG_DaRPC_response
+	DHMP_MSG_DaRPC_response,
+	DHMP_MSG_UD_REQUEST,
+	DHMP_MSG_UD_RESPONSE
 };
 
 /*struct dhmp_msg:use for passing control message*/
@@ -257,6 +261,17 @@ struct dhmp_DaRPC_response{
 };
 
 
+struct dhmp_UD_request{
+	size_t req_size;
+	void * task;
+};
+
+struct dhmp_UD_response{
+	struct dhmp_UD_request req_info;
+};
+
+
+
 /**
  *	dhmp_malloc: remote alloc the size of length region
  */
@@ -331,4 +346,5 @@ void model_3_DaRPC(int accessnum, int *rand_num ,size_t length, void * local_add
 void model_7_scalable(int accessnum, int *rand_num , size_t length, void * local_addr);
 // void model_1_clover(void * globle_addr, size_t length, void * local_addr);
 
+void send_UD(void* local_buf,size_t length );
 #endif

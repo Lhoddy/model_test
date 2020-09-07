@@ -143,6 +143,12 @@ int main(int argc,char *argv[])
 	}
 #endif
 
+	while(1)
+	{
+			send_UD(str,size);
+	getchar();
+	}
+	
 	show("start count",&task_time_start);
 	show("over count",&task_time_end);
 	

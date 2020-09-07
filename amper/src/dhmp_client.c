@@ -102,6 +102,8 @@ out:
 	return NULL;
 }
 
+
+
 void dhmp_free(void *dhmp_addr)
 {
 	struct dhmp_free_work free_work;
@@ -856,7 +858,6 @@ struct dhmp_device *dhmp_get_dev_from_client()
 void dhmp_client_init(size_t size,int obj_num)
 {
 	int i;
-	struct itimerspec poll_its;
 	
 	client=(struct dhmp_client *)malloc(sizeof(struct dhmp_client));
 	if(!client)
@@ -905,9 +906,15 @@ void dhmp_client_init(size_t size,int obj_num)
 			continue;
 		}
 		client->connect_trans[i]->node_id=i;
+#ifdef UD
+		dhmp_transport_connect_UD(client->connect_trans[i],
+							client->config.net_infos[i].addr,
+							client->config.net_infos[i].port);
+#else
 		dhmp_transport_connect(client->connect_trans[i],
 							client->config.net_infos[i].addr,
 							client->config.net_infos[i].port);
+#endif
 	}
 
 	for(i=0;i<client->config.nets_cnt;i++)
@@ -974,11 +981,12 @@ void dhmp_client_destroy()
 {
 	int i;
 	INFO_LOG("send all disconnect start.");
+#ifndef UD
 	for(i=0;i<client->config.nets_cnt;i++)
 	{
 		dhmp_close_connection(client->connect_trans[i]);
 	}
-	
+#endif
 	
 	for(i=0;i<client->config.nets_cnt;i++)
 	{
@@ -992,6 +1000,7 @@ void dhmp_client_destroy()
 	
 	INFO_LOG("client destroy start.");
 	pthread_join(client->ctx.epoll_thread, NULL);
+	rdma_leave_multicast(client->connect_trans[0]->cm_id, (struct sockaddr *)&(client->connect_trans[0]->peer_addr));
 	INFO_LOG("client destroy end.");
 	
 	free(client);
@@ -1198,4 +1207,64 @@ out_work:
 	free(work);
 out:
 	return NULL;
+}
+
+
+void send_UD(void* local_buf,size_t length )
+{
+	struct dhmp_transport *rdma_trans=NULL;
+	struct dhmp_UD_work wwork;
+	struct dhmp_work *work;
+
+	/*select which node to alloc nvm memory*/
+	rdma_trans=dhmp_node_select();
+	if(!rdma_trans)
+	{
+		ERROR_LOG("don't exist remote server.");
+		goto out;
+	}
+
+	work=malloc(sizeof(struct dhmp_work));
+	if(!work)
+	{
+		ERROR_LOG("allocate memory error.");
+		goto out;
+	}
+	
+	wwork.rdma_trans=rdma_trans;
+	wwork.length=length;
+	wwork.done_flag=false;
+	wwork.local_buf = local_buf;
+	wwork.recv_flag=false;
+
+	work->work_type=AMPER_WORK_UD;
+	work->work_data=&wwork;
+
+	{
+		struct dhmp_UD_work *wwork;
+		struct dhmp_msg msg;
+		struct dhmp_UD_request req_msg;
+	
+		wwork=(struct dhmp_UD_work*)work->work_data;
+		
+		/*build malloc request msg*/
+		req_msg.req_size=wwork->length;
+		req_msg.task = wwork;
+		
+		msg.msg_type=DHMP_MSG_UD_REQUEST;
+		msg.data_size=sizeof(struct dhmp_UD_request)+wwork->length;
+		
+		void *temp = malloc(msg.data_size);
+		memcpy(temp, &req_msg ,sizeof(struct dhmp_UD_request));
+		memcpy(temp+ sizeof(struct dhmp_UD_request), wwork->local_buf ,wwork->length);
+		msg.data=temp;
+		amper_ud_post_send(wwork->rdma_trans, &msg);
+	
+		/*wait for the server return result*/
+		while(wwork->done_flag==false);
+		free(temp);
+	}
+	free(work);
+out:
+	return ;
 }

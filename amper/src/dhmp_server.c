@@ -343,6 +343,7 @@ void dhmp_server_init()
 
 	//##############initial
 	server->client_num = 0;
+	
 
 #ifdef DaRPC_SERVER
 	for(i=0; i<DaRPC_clust_NUM; i++)
@@ -350,8 +351,14 @@ void dhmp_server_init()
 #endif
 	server->L5_mailbox.addr == NULL;
 
+
+#ifdef UD
+	err=dhmp_transport_listen_UD(server->listen_trans,
+					server->config.net_infos[server->config.curnet_id].port);
+#else
 	err=dhmp_transport_listen(server->listen_trans,
 					server->config.net_infos[server->config.curnet_id].port);
+#endif
 	if(err)
 		exit(- 1);
 
@@ -391,6 +398,7 @@ void dhmp_server_destroy()
 	for(i =0;i<DHMP_CLIENT_NODE_NUM ;i++)
 		pthread_join(server->scalable_poll_thread[i], NULL);
 #endif
+	rdma_leave_multicast(server->listen_trans->cm_id, (struct sockaddr *)&(server->listen_trans->peer_addr));
 	INFO_LOG("server destroy end.");
 	free(server);
 }
@@ -418,7 +426,7 @@ void amper_allocspace_for_server(struct dhmp_transport* rdma_trans, int is_speci
 			server->L5_message[node_id].addr = nvm_malloc(size);
 			temp_smr = dhmp_create_smr_per_ops(rdma_trans, server->L5_message[node_id].addr, size);
 			server->L5_message[node_id].mr = temp_smr->mr;
-			INFO_LOG("L5 buffer %d %p is ready.",node_id,erver->L5_mailbox.mr->addr);
+			INFO_LOG("L5 buffer %d %p is ready.",node_id,server->L5_mailbox.mr->addr);
 			
 		}
 		break;

@@ -697,8 +697,10 @@ void dhmp_send_work_handler(struct dhmp_work *work)
 		memcpy(temp,&req_msg,sizeof(struct dhmp_Send_request));
 		memcpy(temp+sizeof(struct dhmp_Send_request),Send_work->local_addr, Send_work->length);
 		msg.data = temp;
-
+		
 	dhmp_post_send(Send_work->rdma_trans, &msg);
+
+	
 
 	/*wait for the server return result*/
 	while(!Send_work->recv_flag);
