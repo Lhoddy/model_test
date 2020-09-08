@@ -1261,7 +1261,7 @@ void send_UD(void* local_buf,size_t length )
 		amper_ud_post_send(wwork->rdma_trans, &msg);
 	
 		/*wait for the server return result*/
-		while(wwork->done_flag==false);
+		while(wwork->recv_flag==false);
 		free(temp);
 	}
 	free(work);

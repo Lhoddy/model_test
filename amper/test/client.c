@@ -142,12 +142,14 @@ int main(int argc,char *argv[])
 		model_4_RFP(size, str);  
 	}
 #endif
-
-	while(1)
-	{
-			send_UD(str,size);
-	getchar();
+#ifdef FaSST
+//need #define UD
+	for(j=0;j<accessnum;j++)
+	{ 
+		send_UD(str,size);
 	}
+#endif
+	
 	
 	show("start count",&task_time_start);
 	show("over count",&task_time_end);

@@ -33,13 +33,14 @@ void amper_create_reply_ah(struct dhmp_transport* rdma_trans, struct ibv_wc *wc)
 	if(server == NULL && rdma_trans->ah == NULL) return;
 	struct ibv_qp_attr attr;
 	struct ibv_qp_init_attr init_attr;
-	rdma_trans->ah = ibv_create_ah_from_wc(rdma_trans->device->pd, wc, (void*)rdma_trans->ctx,
+	rdma_trans->ah = ibv_create_ah_from_wc(rdma_trans->device->pd, wc, (void*)rdma_trans->recv_mr.addr,
 					 rdma_trans->cm_id->port_num);
 	rdma_trans->qp_num = ntohl(wc->imm_data);
 
 	ibv_query_qp(rdma_trans->cm_id->qp, &attr, IBV_QP_QKEY, &init_attr);
 	rdma_trans->qkey = attr.qkey;
 	INFO_LOG("amper_create_reply_ah  local = %d qp_num=%d qkey=%d", rdma_trans->cm_id->qp->qp_num,rdma_trans->qp_num, rdma_trans->qkey);
+	rdma_trans->trans_state=DHMP_TRANSPORT_STATE_CONNECTED;
 }
 
 void * nvm_malloc(size_t size)
@@ -783,13 +784,17 @@ static void dhmp_wc_success_handler(struct ibv_wc* wc)
 	struct dhmp_transport *rdma_trans;
 	struct dhmp_msg msg;
 	task_ptr=(struct dhmp_task*)(uintptr_t)wc->wr_id;
+	void * message_cxt = task_ptr->sge.addr;
+#ifdef UD
+	message_cxt += 40;
+#endif
 	rdma_trans=task_ptr->rdma_trans;
 	if(wc->opcode == IBV_WC_RECV)
 	{
 		/*read the msg content from the task_ptr sge addr*/
-		msg.msg_type=*(enum dhmp_msg_type*)task_ptr->sge.addr;
-		msg.data_size=*(size_t*)(task_ptr->sge.addr+sizeof(enum dhmp_msg_type));
-		msg.data=task_ptr->sge.addr+sizeof(enum dhmp_msg_type)+sizeof(size_t);
+		msg.msg_type=*(enum dhmp_msg_type*)message_cxt;
+		msg.data_size=*(size_t*)(message_cxt+sizeof(enum dhmp_msg_type));
+		msg.data=message_cxt+sizeof(enum dhmp_msg_type)+sizeof(size_t);
 	}
 	INFO_LOG("opcode:%s , %p",dhmp_wc_opcode_str(wc->opcode),rdma_trans);
 	switch(wc->opcode)
@@ -974,10 +979,10 @@ static int amper_ud_qp_create(struct dhmp_transport* rdma_trans)
 	qp_init_attr.send_cq=dcq->cq;
 	qp_init_attr.recv_cq=dcq->cq;
 
-	qp_init_attr.cap.max_send_wr=150;
+	qp_init_attr.cap.max_send_wr=1500;
 	qp_init_attr.cap.max_send_sge=1;
 
-	qp_init_attr.cap.max_recv_wr=150;
+	qp_init_attr.cap.max_recv_wr=1500;
 	qp_init_attr.cap.max_recv_sge=1;
 
 
@@ -1157,7 +1162,7 @@ static struct dhmp_transport* dhmp_is_exist_connection(struct sockaddr_in *sock)
 }
 
 static int on_cm_connect_request(struct rdma_cm_event* event, 
-										struct dhmp_transport* rdma_trans)
+										struct dhmp_transport* rdma_trans)   //only for ud client  not ud server
 {
 	struct dhmp_transport* new_trans,*normal_trans;
 	struct rdma_conn_param conn_param;
@@ -1338,7 +1343,7 @@ static int dhmp_handle_ec_event(struct rdma_cm_event* event)
 		case RDMA_CM_EVENT_ROUTE_RESOLVED:
 			retval=on_cm_route_resolved(event, rdma_trans);
 			break;
-		case RDMA_CM_EVENT_CONNECT_REQUEST:
+		case RDMA_CM_EVENT_CONNECT_REQUEST: 
 			retval=on_cm_connect_request(event,rdma_trans);
 			break;
 		case RDMA_CM_EVENT_ESTABLISHED:
@@ -1741,12 +1746,15 @@ static void dhmp_post_recv(struct dhmp_transport* rdma_trans, void *addr)
 	recv_wr.num_sge=1;
 
 	sge.addr=(uintptr_t)recv_task_ptr->sge.addr;
-	sge.length=recv_task_ptr->sge.length;
+	sge.length=recv_task_ptr->sge.length + sizeof(struct ibv_grh);
 	sge.lkey=recv_task_ptr->sge.lkey;
 	
 	err=ibv_post_recv(rdma_trans->qp, &recv_wr, &bad_wr_ptr);
 	if(err)
+	{
+		fprintf(stderr, "Error, rdma_create_qp() failed: %d %s\n",err, strerror(errno)); 
 		ERROR_LOG("ibv post recv error.");
+	}
 	
 }
 
