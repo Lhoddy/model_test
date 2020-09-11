@@ -1,13 +1,13 @@
 #include "dhmp.h"
 #include "dhmp_log.h"
 #include "dhmp_hash.h"
-#include "dhmp_config.h"
 #include "dhmp_context.h"
 
 void *dhmp_context_run(void *data)
 {
 	struct epoll_event events[DHMP_EPOLL_SIZE];
 	struct dhmp_event_data *event_data_ptr;
+	
 	struct dhmp_context *ctx=(struct dhmp_context*)data;
 	int i,events_nr=0;
 	
@@ -26,6 +26,7 @@ void *dhmp_context_run(void *data)
 											event_data_ptr->data_ptr);
 			}
 		}
+		
 		if(ctx->stop)
 			break;
 	}
@@ -37,23 +38,13 @@ void *dhmp_context_run(void *data)
 
 int dhmp_context_init(struct dhmp_context *ctx)
 {
-	int retval=0;
-
-	ctx->epoll_fd=epoll_create(DHMP_EPOLL_SIZE);
-	if(ctx->epoll_fd < 0)
+	ctx->epoll_thread=kthread_run(dhmp_context_run,NULL,ctx);
+	if(IS_ERR(ctx->epoll_thread))
 	{
 		ERROR_LOG("create epoll fd error.");
 		return -1;
 	}
-
-	retval=pthread_create(&ctx->epoll_thread, NULL, dhmp_context_run, ctx);
-	if(retval)
-	{
-		ERROR_LOG("pthread create error.");
-		close(ctx->epoll_fd);
-	}
-
-	return retval;
+	return 0;
 }
 
 int dhmp_context_add_event_fd(struct dhmp_context *ctx,
@@ -66,7 +57,7 @@ int dhmp_context_add_event_fd(struct dhmp_context *ctx,
 	struct dhmp_event_data *event_data_ptr;
 	int retval=0;
 	
-	event_data_ptr=(struct dhmp_event_data*)malloc(sizeof(struct dhmp_event_data));
+	event_data_ptr=(struct dhmp_event_data*)kernel_malloc(sizeof(struct dhmp_event_data));
 	if(!event_data_ptr)
 	{
 		ERROR_LOG("allocate memory error.");
@@ -85,7 +76,7 @@ int dhmp_context_add_event_fd(struct dhmp_context *ctx,
 	if(retval)
 	{
 		ERROR_LOG("dhmp_context add event fd error.");
-		free(event_data_ptr);
+		vfree(event_data_ptr);
 	}
 	else
 		INFO_LOG("dhmp_context add event fd success.");

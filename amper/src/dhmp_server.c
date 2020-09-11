@@ -398,7 +398,6 @@ void dhmp_server_destroy()
 	for(i =0;i<DHMP_CLIENT_NODE_NUM ;i++)
 		pthread_join(server->scalable_poll_thread[i], NULL);
 #endif
-	rdma_leave_multicast(server->listen_trans->cm_id, (struct sockaddr *)&(server->listen_trans->peer_addr));
 	INFO_LOG("server destroy end.");
 	free(server);
 }
