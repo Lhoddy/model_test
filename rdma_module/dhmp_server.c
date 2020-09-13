@@ -32,6 +32,7 @@ struct dhmp_device *dhmp_get_dev_from_server(void)
 static void amper_add_one(struct ib_device * ib_device)
 {
 	int err = 0;
+	struct dhmp_device *dev;
 	server=(struct dhmp_server *)kernel_malloc(sizeof(struct dhmp_server));
 	if(!server)
 		ERROR_LOG("kernel_malloc error!");
@@ -43,10 +44,11 @@ static void amper_add_one(struct ib_device * ib_device)
 	dhmp_dev_list_init(ib_device, &server->dev_list); //ib_alloc_pd
 	INFO_LOG("dhmp_dev_list_init");
 
-
-	server->listen_trans=dhmp_transport_create(&server->ctx,
-											dhmp_get_dev_from_server(),
-											true, false); //rdma
+	dev =  dhmp_get_dev_from_server();
+	if(dev->ib_device != ib_device)
+		ERROR_LOG("dhmp_get_dev_from_server error");
+	server->mr = ib_alloc_mr(dev->pd, IB_MR_TYPE_SG_GAPS ,IB_ACCESS_LOCAL_WRITE | IB_ACCESS_REMOTE_WRITE | IB_ACCESS_REMOTE_READ | IB_ACCESS_REMOTE_ATOMIC);
+	server->listen_trans=dhmp_transport_create(dev, true, false); //rdma
 	if(!server->listen_trans)
 	{
 		ERROR_LOG("create rdma transport error.");
@@ -64,15 +66,15 @@ static void amper_add_one(struct ib_device * ib_device)
     return ;
 }
 
-static void amper_remove_one(struct ib_device * ib_device)
-{
+// static void amper_remove_one(struct ib_device * ib_device)
+// {
 
-}
+// }
 
 static struct ib_client amper_server = {
 	.name = "amper_server",
 	.add = amper_add_one,
-	.remove = amper_remove_one
+	// .remove = amper_remove_one
 };
 
 static int __init server_init(void)
@@ -91,44 +93,6 @@ static void __exit server_exit(void)
 {
 	INFO_LOG("server_exit Goodbye");
 }
-
-const char* dhmp_wc_opcode_str(enum ib_wc_opcode opcode)
-{
-	switch(opcode)
-	{
-		case IB_WC_SEND:
-			return "IB_WC_SEND";
-		case IB_WC_RDMA_WRITE:
-			return "IB_WC_RDMA_WRITE";
-		case IB_WC_RDMA_READ:
-			return "IB_WC_RDMA_READ";
-		case IB_WC_COMP_SWAP:
-			return "IB_WC_COMP_SWAP";
-		case IB_WC_FETCH_ADD:
-			return "IB_WC_FETCH_ADD";
-		case IB_WC_BIND_MW:
-			return "IB_WC_BIND_MW";
-		case IB_WC_RECV:
-			return "IB_WC_RECV";
-		case IB_WC_RECV_RDMA_WITH_IMM:
-			return "IB_WC_RECV_RDMA_WITH_IMM";
-		default:
-			return "IB_WC_UNKNOWN";
-	};
-}
-
-static void dhmp_wc_success_handler(struct ib_wc* wc)
-{
-	INFO_LOG("dhmp_wc_success_handler");
-}
-
-static void dhmp_wc_error_handler(struct ib_wc* wc)
-{
-		ERROR_LOG("wc status is ERROR");
-}
-
-
-
 
 module_init(server_init);
 module_exit(server_exit);

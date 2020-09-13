@@ -1,5 +1,5 @@
 #include "dhmp_log.h"
-
+#include "dhmp.h"
 #define DEBUG_ON
 
 enum dhmp_log_level global_log_level=DHMP_LOG_LEVEL_WARN;
@@ -12,11 +12,11 @@ const char *const level_str[]=
 void dhmp_log_impl(const char * file, unsigned line, const char * func, unsigned log_level, const char * fmt, ...)
 {
 	va_list args;
-	char mbuf[2048];
+	char mbuf[1024];
 	int mlength=0;
 
 	const char *short_filename;
-	char filebuf[270];//filename at most 256
+	char filebuf[100];//filename at most 256
 	
 	/*get the args,fill in the string*/
 	va_start(args,fmt);

@@ -36,7 +36,6 @@ struct dhmp_tasklist{
 };
 
 struct dhmp_server{
-	struct dhmp_context ctx;
 
 	struct dhmp_transport *listen_trans;
 	struct dhmp_transport *connect_trans[DHMP_CLIENT_NODE_NUM];
@@ -61,11 +60,8 @@ struct dhmp_server{
 
 	int client_num;
 
-	struct  {
-		struct ib_mr* mr;
-		void * addr;
-		struct ib_mr* read_mr;
-	} L5_mailbox;
+	struct ib_mr* mr;
+	void * addr;
 
 };
 

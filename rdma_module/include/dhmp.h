@@ -21,7 +21,6 @@
 #include <linux/pagemap.h>
 
 #include <linux/buffer_head.h>
-#include <asm/tlbflush.h>
 #include <linux/semaphore.h>
 #include <linux/completion.h>
 #include <linux/list.h>
@@ -31,11 +30,9 @@
 #include <linux/jiffies.h>
 #include <linux/device.h>
 #include <linux/atomic.h>
-#include <rdma/ib_verbs.h>
 #include <net/sock.h>
 #include <net/tcp.h>
 #include <net/sock.h>
-#include <linux/types.h>
 #include <linux/syscalls.h>
 
 #include <linux/semaphore.h>
@@ -294,7 +291,6 @@ struct dhmp_UD_response{
 /**
  *	dhmp_malloc: remote alloc the size of length region
  */
-void *kernel_malloc(size_t size);
 struct dhmp_device *dhmp_get_dev_from_server(void);
 
 void *dhmp_malloc(size_t length, int is_special);
@@ -346,7 +342,7 @@ int dhmp_handle_ec_event(struct rdma_cm_event* event);
 int dhmp_send(void *dhmp_addr, void * local_buf, size_t count, bool is_write);
 
 void *kernel_malloc(size_t size);
-void kernel_free(size_t size);
+void kernel_free(void * addr);
 
 void model_A_write(void * globle_addr, size_t length, void * local_addr);
 void model_A_writeImm(void * globle_addr, size_t length, void * local_addr);

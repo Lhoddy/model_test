@@ -21,18 +21,17 @@ static int dhmp_dev_init ( struct ib_device* ib_device, struct dhmp_device* dev_
 
 	struct ib_port_attr attr;
 	retval = ib_query_port(ib_device,1,&attr);
-	{
-		INFO_LOG("ib_query_port %d",retval);
-	}
+	INFO_LOG("ib_query_port %d",retval);
 
-	retval=ib_query_device ( ib_device, &dev_ptr->device_attr );
-	if ( retval<0 )
-	{
-		ERROR_LOG ( "ib_query_device error." );
-		goto out;
-	}
+	memcpy(&dev_ptr->device_attr , &ib_device->attrs ,sizeof(struct ib_device_attr));
+	// retval=ib_query_device ( ib_device, &dev_ptr->device_attr );
+	// if ( retval<0 )
+	// {
+	// 	ERROR_LOG ( "ib_query_device error." );
+	// 	goto out;
+	// }
 	
-	dev_ptr->pd=ib_alloc_pd ( ib_device );
+	dev_ptr->pd=ib_alloc_pd ( ib_device , 0);
 	if ( !dev_ptr->pd )
 	{
 		ERROR_LOG ( "ib_alloc_pd error." );
@@ -58,7 +57,6 @@ out:
  */
 void dhmp_dev_list_init(struct ib_device * ib_device, struct list_head * dev_list_ptr)
 {
-	int i,num_devices=1,err=0;
 	struct dhmp_device *dev_ptr;
 
 	dev_ptr=(struct dhmp_device*)kernel_malloc(sizeof(struct dhmp_device));
@@ -96,7 +94,7 @@ void dhmp_dev_list_destroy(struct list_head *dev_list_ptr)
 						dev_list_ptr, 
 						dev_entry)
 	{
-		if(dev_tmp_ptr->verbs)
+		if(dev_tmp_ptr->ib_device)
 			ib_dealloc_pd ( dev_tmp_ptr->pd );
 		vfree(dev_tmp_ptr);
 	}

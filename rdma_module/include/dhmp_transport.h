@@ -52,8 +52,8 @@ struct dhmp_transport{
 	struct rdma_cm_id	*cm_id;
 
 	/*the var use for two sided RDMA*/
-	struct dhmp_mr send_mr;
-	struct dhmp_mr recv_mr;
+	void * send_addr;
+	void * recv_addr;
 	
 	bool is_poll_qp;
 
@@ -69,8 +69,7 @@ struct dhmp_send_mr{
 	struct list_head send_mr_entry;
 };
 
-struct dhmp_transport* dhmp_transport_create(struct dhmp_context* ctx, 
-													struct dhmp_device* dev,
+struct dhmp_transport* dhmp_transport_create(struct dhmp_device* dev,
 													bool is_listen,
 													bool is_poll_qp);
 
