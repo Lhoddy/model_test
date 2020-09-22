@@ -69,10 +69,6 @@ int amper_post_read(struct dhmp_task* task, struct ibv_mr* rmr, uint64_t* sge_ad
 	}	
 }
 
-void *dhmp_transfer_dhmp_addr(struct dhmp_transport *rdma_trans, void *normal_addr)
-{
-		return normal_addr;
-}
 
 /**
  * dhmp_hash_in_client:cal the addr into hash key
@@ -97,22 +93,9 @@ static void dhmp_addr_info_insert_ht(void *dhmp_addr,
 											struct dhmp_addr_info *addr_info)
 {
 	int index;
-
 	index=dhmp_hash_in_client(dhmp_addr);
 	DEBUG_LOG("insert ht %d %p",index,addr_info->nvm_mr.addr);
 	hlist_add_head(&addr_info->addr_entry, &client->addr_info_ht[index]);
-}
-
-
-
-
-int dhmp_get_node_index_from_addr(void *dhmp_addr)
-{
-	long long node_index=(long long)dhmp_addr;
-	int res;
-	node_index=node_index>>48;
-	res=node_index;
-	return res;
 }
 
 void dhmp_malloc_work_handler(struct dhmp_work *work)
@@ -155,9 +138,7 @@ void dhmp_malloc_work_handler(struct dhmp_work *work)
 		free(malloc_work->addr_info);
 	else
 	{
-		res_addr=dhmp_transfer_dhmp_addr(malloc_work->rdma_trans,
-										malloc_work->addr_info->nvm_mr.addr);
-		malloc_work->addr_info->node_index=dhmp_get_node_index_from_addr(res_addr);
+		res_addr= malloc_work->addr_info->nvm_mr.addr;
 		malloc_work->addr_info->write_flag=false;
 		dhmp_addr_info_insert_ht(res_addr, malloc_work->addr_info);
 	}
@@ -167,21 +148,6 @@ end:
 	malloc_work->done_flag=true;
 }
 
-void *dhmp_transfer_normal_addr(void *dhmp_addr)
-{
-	long long node_index, ll_addr;
-	void *normal_addr;
-	
-	ll_addr=(long long)dhmp_addr;
-	node_index=ll_addr>>48;
-
-	node_index=node_index<<48;
-
-	ll_addr-=node_index;
-	normal_addr=(void*)ll_addr;
-
-	return normal_addr;
-}
 
 /**
  *	dhmp_get_addr_info_from_ht:according to addr, find corresponding addr info
@@ -189,16 +155,14 @@ void *dhmp_transfer_normal_addr(void *dhmp_addr)
 struct dhmp_addr_info *dhmp_get_addr_info_from_ht(int index, void *dhmp_addr)
 {
 	struct dhmp_addr_info *addr_info;
-	void *normal_addr;
 	
 	if(hlist_empty(&client->addr_info_ht[index]))
 		goto out;
 	else
 	{
-		normal_addr=dhmp_transfer_normal_addr(dhmp_addr);
 		hlist_for_each_entry(addr_info, &client->addr_info_ht[index], addr_entry)
 		{
-			if(addr_info->nvm_mr.addr==normal_addr)
+			if(addr_info->nvm_mr.addr==dhmp_addr)
 				break;
 		}
 	}

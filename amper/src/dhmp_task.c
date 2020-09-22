@@ -54,7 +54,7 @@ struct dhmp_task* dhmp_send_task_create(struct dhmp_transport* rdma_trans,
 							sizeof(size_t)+
 							msg->data_size;
 	
-	if(send_mr->cur_pos+send_task->sge.length>SEND_REGION_SIZE)
+	if(send_mr->cur_pos+send_task->sge.length > SEND_REGION_SIZE)
 		send_mr->cur_pos=0;
 	
 	send_task->sge.addr=send_mr->addr+send_mr->cur_pos;

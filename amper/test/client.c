@@ -104,7 +104,7 @@ int main(int argc,char *argv[])
 #ifdef clover
 	dhmp_malloc(objnum,2); // clover c&s point
 	for(i=0;i<objnum;i++)
-		addr[i]=dhmp_malloc(size,0);
+		addr[i]=dhmp_malloc(size,0);1
 	for(j=0;j<accessnum;j++)
 	{ 
 		i = j%objnum;
@@ -121,10 +121,7 @@ int main(int argc,char *argv[])
 		model_5_L5(size, str);
 	}
 #endif
-#ifdef Tailwind
-	dhmp_malloc((size*objnum), 4); // for Tailwind
-	model_6_Tailwind(accessnum,objnum, rand_num, size, str); // only unif ，用的默认的send recv queue  
-#endif
+
 #ifdef DaRPC
 	dhmp_malloc(0,5); //DaRPC
 	model_3_DaRPC(accessnum, rand_num, size, str ); //用的默认的send recv queue
@@ -149,7 +146,11 @@ int main(int argc,char *argv[])
 		send_UD(str,size);
 	}
 #endif
-	
+
+#ifdef Tailwind
+	dhmp_malloc((size*objnum), 4); // for Tailwind
+	model_6_Tailwind(accessnum,objnum, rand_num, size, str); // only unif ，用的默认的send recv queue  
+#endif
 	
 	show("start count",&task_time_start);
 	show("over count",&task_time_end);

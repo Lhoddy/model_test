@@ -5,7 +5,6 @@
 #define SINGLE_AREA_SIZE 4194304  
 
 
-extern const size_t buddy_size[MAX_ORDER];
 
 struct dhmp_free_block{
 	void *addr;
@@ -20,13 +19,9 @@ struct dhmp_free_block_head{
 };
 
 struct dhmp_area{
-	/*be able to alloc max size=buddy_size[max_index]*/
-	int max_index;
 	//pthread_spinlock_t mutex_area;
 	struct ibv_mr *mr;
 	struct list_head area_entry;
-	struct dhmp_free_block_head block_head[MAX_ORDER];
-	void *server_addr;
 };
 struct dhmp_tasklist{
 	struct dhmp_transport *rdma_trans;
@@ -49,9 +44,7 @@ struct dhmp_server{
 	struct list_head client_list;
 
 	/*below structure about area*/
-	struct dhmp_area *cur_area;
-	struct list_head area_list;
-	struct list_head more_area_list;
+	struct list_head area_list[DHMP_CLIENT_NODE_NUM];
 
 	int cur_connections;
 	long nvm_used_size;
@@ -108,7 +101,7 @@ struct dhmp_server{
 
 extern struct dhmp_server *server;
 
-struct dhmp_area *dhmp_area_create(bool is_init_buddy, size_t length);
+struct dhmp_area *dhmp_area_create(size_t length);
 struct ibv_mr * dhmp_malloc_poll_area(size_t length);
 
 struct dhmp_device *dhmp_get_dev_from_server();

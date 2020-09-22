@@ -27,14 +27,6 @@
 //32MB:33554432,67108864,134217728,268435456,536870912
 //64MB:67108864,134217728,268435456,536870912,1073741824,2147483648
 
-/*BUDDY_NUM_SUM = the total num of buddy num array*/
-#define BUDDY_NUM_SUM 6
-const int buddy_num[MAX_ORDER]={2,1,1,1,1};
-const size_t buddy_size[MAX_ORDER]=/* {32,64,128,256,512};*/
-{64,128,256,512,1024};
-//{512,1024,2048,4096,8192};
-//{4096,8192,16384,32768,65536};
-//{32768,65536,131072,262144,524288};
 struct dhmp_server *server=NULL;
 
 
@@ -54,58 +46,8 @@ struct dhmp_device *dhmp_get_dev_from_server()
 	return res_dev_ptr;
 }
 
-/**
- *	dhmp_buddy_system_build:build the buddy system in area
- */
-bool dhmp_buddy_system_build(struct dhmp_area *area)
-{
-	struct dhmp_free_block *free_blk[BUDDY_NUM_SUM];
-	int i,j,k,size=buddy_size[0],total=0;
 
-	for(k=0;k<BUDDY_NUM_SUM;k++)
-	{
-		free_blk[k]=malloc(sizeof(struct dhmp_free_block));
-		if(!free_blk[k])
-		{
-			ERROR_LOG("allocate memory error.");
-			goto out_free_blk_array;
-		}
-	}
-	
-	for(i=0,k=0;i<MAX_ORDER;i++)
-	{
-		INIT_LIST_HEAD(&area->block_head[i].free_block_list);
-		area->block_head[i].nr_free=buddy_num[i];
-		
-		for(j=0;j<buddy_num[i];j++)
-		{
-			free_blk[k]->addr=area->mr->addr+total;
-			free_blk[k]->size=size;
-			free_blk[k]->mr=area->mr;
-			list_add_tail(&free_blk[k]->free_block_entry,
-						&area->block_head[i].free_block_list);
-			total+=size;
-			INFO_LOG("i %d k %d addr %p",i,k,free_blk[k]->addr);
-			k++;
-		}
-		
-		size*=2;
-	}
-
-	return true;
-	
-out_free_blk_array:
-	for(k=0;k<BUDDY_NUM_SUM;k++)
-	{
-		if(free_blk[k])
-			free(free_blk[k]);
-		else
-			break;
-	}
-	return false;
-}
-
-struct dhmp_area *dhmp_area_create(bool has_buddy_sys,size_t length)
+struct dhmp_area *dhmp_area_create(size_t length)
 {
 	void *addr=NULL;
 	struct dhmp_area *area=NULL;
@@ -114,7 +56,7 @@ struct dhmp_area *dhmp_area_create(bool has_buddy_sys,size_t length)
 	bool res;
 	
 	/*nvm memory*/
-	addr=malloc(length);//numa_alloc_onnode(length,3);
+	addr=nvm_malloc(length);
 	if(!addr)
 	{
 		ERROR_LOG("allocate nvm memory error.");
@@ -126,7 +68,8 @@ struct dhmp_area *dhmp_area_create(bool has_buddy_sys,size_t length)
 				addr, length, 
 				IBV_ACCESS_LOCAL_WRITE|
 				IBV_ACCESS_REMOTE_READ|
-				IBV_ACCESS_REMOTE_WRITE|IBV_ACCESS_REMOTE_ATOMIC);
+				IBV_ACCESS_REMOTE_WRITE|
+				IBV_ACCESS_REMOTE_ATOMIC);
 	if(!mr)
 	{
 		ERROR_LOG("ib register mr error.");
@@ -141,20 +84,8 @@ struct dhmp_area *dhmp_area_create(bool has_buddy_sys,size_t length)
 	}
 
 	area->mr=mr;
-area->server_addr=addr;
-	if(has_buddy_sys)
-	{
-		area->max_index=MAX_ORDER-1;
-		res=dhmp_buddy_system_build(area);
-		if(!res)
-			goto out_area;
-		list_add(&area->area_entry, &server->area_list);
-	}
-	else
-	{
-		list_add(&area->area_entry, &server->more_area_list);
-		area->max_index=-2;	
-	}
+
+		list_add(&area->area_entry, &server->area_list[0]);
 	
 	return area;
 
@@ -363,9 +294,8 @@ void dhmp_server_init()
 		exit(- 1);
 
 	/*create one area and init area list*/	
-	INIT_LIST_HEAD(&server->area_list);
-	INIT_LIST_HEAD(&server->more_area_list);
-	server->cur_area=dhmp_area_create(true, 2097152);
+	INIT_LIST_HEAD(&server->area_list[0]);
+	// server->cur_area=dhmp_area_create(2097152);
 
 #ifdef model_B
 	pthread_create(&server->model_B_write_epoll_thread, NULL, model_B_write_run, NULL);

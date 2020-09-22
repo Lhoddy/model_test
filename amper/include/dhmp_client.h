@@ -15,15 +15,11 @@ struct dhmp_client{
 
 	struct list_head dev_list;
 
-	struct dhmp_transport *connect_trans[DHMP_SERVER_NODE_NUM];
+	struct dhmp_transport *connect_trans;
 
 	/*store the dhmp_addr_entry hashtable*/
 	//pthread_mutex_t mutex_ht;
 	struct hlist_head addr_info_ht[DHMP_CLIENT_HT_SIZE];
-
-	int poll_ht_fd;
-	struct timespec poll_interval;
-	pthread_t poll_ht_thread;
 	
 	pthread_mutex_t mutex_send_mr_list;
 	struct list_head send_mr_list;

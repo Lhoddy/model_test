@@ -45,7 +45,7 @@ void amper_create_reply_ah(struct dhmp_transport* rdma_trans, struct ibv_wc *wc)
 
 void * nvm_malloc(size_t size)
 {
-	return malloc(size);
+	return malloc(size);//numa_alloc_onnode(length,3);
 }
 
 void nvm_free(void *addr)
@@ -80,165 +80,6 @@ const char* dhmp_wc_opcode_str(enum ibv_wc_opcode opcode)
 			return "IBV_WC_UNKNOWN";
 	};
 }
-
-/**
- *	below functions about malloc memory in dhmp_server
- */
-static struct dhmp_free_block* dhmp_get_free_block(struct dhmp_area* area,
-														int index)
-{
-	struct dhmp_free_block *res,*left_blk,*right_blk;
-	int i;
-
-	res=left_blk=right_blk=NULL;
-retry:
-	for(i=index; i<MAX_ORDER; i++)
-	{
-		if(!list_empty(&area->block_head[i].free_block_list))
-			break;
-	}
-
-	if(i==MAX_ORDER)
-	{
-		ERROR_LOG("don't exist enough large free block.");
-		res=NULL;
-		goto out;
-	}
-
-	if(i!=index)
-	{
-		right_blk=malloc(sizeof(struct dhmp_free_block));
-		if(!right_blk)
-		{
-			ERROR_LOG("allocate memory error.");
-			goto out;
-		}
-
-		left_blk=list_entry(area->block_head[i].free_block_list.next,
-						struct dhmp_free_block, free_block_entry);
-		list_del(&left_blk->free_block_entry);
-		left_blk->size=left_blk->size/2;
-
-		right_blk->mr=left_blk->mr;
-		right_blk->size=left_blk->size;
-		right_blk->addr=left_blk->addr+left_blk->size;
-
-		list_add(&right_blk->free_block_entry, 
-				&area->block_head[i-1].free_block_list);
-		list_add(&left_blk->free_block_entry, 
-				&area->block_head[i-1].free_block_list);
-		
-		area->block_head[i].nr_free-=1;
-		area->block_head[i-1].nr_free+=2;
-		goto retry;
-	}
-	else
-	{
-		res=list_entry(area->block_head[i].free_block_list.next,
-						struct dhmp_free_block, free_block_entry);
-		list_del(&res->free_block_entry);
-		area->block_head[i].nr_free-=1;
-	}
-
-	for(i=area->max_index; i>=0; i--)
-	{
-		if(!list_empty(&area->block_head[i].free_block_list))
-			break;
-	}
-
-	area->max_index=i;
-	
-out:
-	return res;
-}
-
-static bool dhmp_malloc_one_block(struct dhmp_msg* msg,
-										struct dhmp_mc_response* response)
-{
-	struct dhmp_free_block* free_blk=NULL;
-	struct dhmp_area* area=NULL;
-	int index=0;
-
-	for(index=0; index<MAX_ORDER; index++)
-		if(response->req_info.req_size<=buddy_size[index])
-			break;
-	
-	if(server->cur_area->max_index>=index)
-		area=server->cur_area;
-	else
-	{
-		list_for_each_entry(area, &server->area_list, area_entry)
-		{
-			if(area->max_index>=index)
-			{
-				server->cur_area=area;
-				break;
-			}
-		}
-	}
-	
-	if(&area->area_entry == &(server->area_list))
-	{
-		area=dhmp_area_create(true, SINGLE_AREA_SIZE);
-		if(!area)
-		{
-			ERROR_LOG ( "allocate area memory error." );
-			goto out;
-		}
-		server->cur_area=area;
-	}
-	
-	free_blk=dhmp_get_free_block(area, index);
-	if(!free_blk)
-	{
-		ERROR_LOG("fetch free block error.");
-		goto out;
-	}
-
-	memcpy(&response->mr, free_blk->mr, sizeof(struct ibv_mr));
-	response->mr.addr=free_blk->addr;
-	response->mr.length=free_blk->size;
-	response->server_addr = free_blk->addr;
-
-	DEBUG_LOG("malloc addr %p lkey %ld length is %d",
-			free_blk->addr, free_blk->mr->lkey, free_blk->mr->length );
-
-	snprintf(free_blk->addr, response->req_info.req_size, "nvmhhhhhhhh%p", response->server_addr);
-
-	free(free_blk);
-	return true;
-
-out:
-	return false;
-}
-
-
-static bool dhmp_malloc_more_area(struct dhmp_msg* msg, 
-										struct dhmp_mc_response* response_msg,
-										size_t length )
-{
-	struct dhmp_area *area;
-
-	area=dhmp_area_create(false, length);
-	if(!area)
-	{
-		ERROR_LOG("allocate one area error.");
-		return false;
-	}
-	
-	memcpy(&response_msg->mr, area->mr, sizeof(struct ibv_mr));
-	response_msg->server_addr = area->server_addr;
-
-	INFO_LOG("malloc addr %p lkey %ld",
-			response_msg->mr.addr, response_msg->mr.lkey);
-	
-	snprintf(response_msg->mr.addr,
-			response_msg->req_info.req_size, 
-			"welcomebj%p", area);
-
-	return true;
-}
-
 
 static void dhmp_send_request_handler(struct dhmp_transport* rdma_trans,
 												struct dhmp_msg* msg)
@@ -289,6 +130,34 @@ static void dhmp_send_response_handler(struct dhmp_transport* rdma_trans,struct 
 	DEBUG_LOG("response send addr %p ",response_msg.req_info.dhmp_addr);
 }
 
+/**
+ *	below functions about malloc memory in dhmp_server
+ */
+static bool dhmp_malloc_area(struct dhmp_msg* msg, 
+										struct dhmp_mc_response* response_msg,
+										size_t length )
+{
+	struct dhmp_area *area;
+
+	area=dhmp_area_create(length);
+	if(!area)
+	{
+		ERROR_LOG("allocate one area error.");
+		return false;
+	}
+	
+	memcpy(&response_msg->mr, area->mr, sizeof(struct ibv_mr));
+	response_msg->server_addr = area->mr->addr;
+
+	INFO_LOG("malloc addr %p lkey %ld",
+			response_msg->mr.addr, response_msg->mr.lkey);
+	
+	// snprintf(response_msg->mr.addr,
+	// 		response_msg->req_info.req_size, 
+	// 		"welcomebj%p", area);
+
+	return true;
+}
 
 static void dhmp_malloc_request_handler(struct dhmp_transport* rdma_trans,
 												struct dhmp_msg* msg)
@@ -353,17 +222,9 @@ static void dhmp_malloc_request_handler(struct dhmp_transport* rdma_trans,
 	}
 	else
 	{
-		if(response.req_info.req_size <= buddy_size[MAX_ORDER-1])
+		if(response.req_info.req_size <= SINGLE_AREA_SIZE)
 		{
-			res=dhmp_malloc_one_block(msg, &response);
-		}
-		else if(response.req_info.req_size <= SINGLE_AREA_SIZE)
-		{
-			res=dhmp_malloc_more_area(msg, &response, SINGLE_AREA_SIZE);
-		}
-		else
-		{
-			res=dhmp_malloc_more_area(msg, &response, response.req_info.req_size);
+			res=dhmp_malloc_area(msg, &response, response.req_info.req_size);
 		}
 		if(!res)
 			goto req_error;
@@ -457,133 +318,9 @@ static void dhmp_malloc_error_handler(struct dhmp_transport* rdma_trans, struct 
 /**
  *	below functions about free memory in dhmp_server
  */
-static struct dhmp_free_block* dhmp_free_blk_create(void* addr,
-															size_t size,
-															struct ibv_mr* mr)
-{
-	struct dhmp_free_block* new_free_blk;
-
-	new_free_blk=malloc(sizeof(struct dhmp_free_block));
-	if(!new_free_blk)
-	{
-		ERROR_LOG ( "allocate memory error." );
-		return NULL;
-	}
-	
-	new_free_blk->addr=addr;
-	new_free_blk->size=size;
-	new_free_blk->mr=mr;
-	return new_free_blk;
-}
-
-static bool dhmp_recycle_free_block(struct dhmp_area* area,
-											void** addr_ptr, int index)
-{
-	bool left_dir=true;
-	void* addr=*addr_ptr;
-	struct list_head* free_list;
-	struct dhmp_free_block *new_free_blk=NULL,*large_free_blk,*tmp;
-
-	free_list=&area->block_head[index].free_block_list;
-	if(list_empty(free_list))
-	{
-		new_free_blk=dhmp_free_blk_create(addr, buddy_size[index], area->mr);
-		list_add(&new_free_blk->free_block_entry, free_list);
-		return false;
-	}
-
-	/*can not merge up index+1*/
-	if(index==MAX_ORDER-1)
-	{
-		list_for_each_entry(large_free_blk, free_list, free_block_entry)
-		{
-			if(addr<large_free_blk->addr)
-				goto create_free_blk;
-		}
-		goto create_free_blk;
-	}
-	
-	if((addr-area->mr->addr)%buddy_size[index+1]!=0)
-		left_dir=false;
-
-	list_for_each_entry(tmp, free_list, free_block_entry)
-	{
-		if((left_dir&&(addr+buddy_size[index]==tmp->addr))||
-			(!left_dir&&(tmp->addr+buddy_size[index]==addr)))
-		{
-			list_del(&tmp->free_block_entry);
-			*addr_ptr=min(addr, tmp->addr);
-			return true;
-		}
-	}
-
-	list_for_each_entry(large_free_blk, free_list, free_block_entry)
-	{
-		if(addr<large_free_blk->addr)
-			break;
-	}
-
-create_free_blk:
-	new_free_blk=dhmp_free_blk_create(addr, buddy_size[index], area->mr);
-	list_add_tail(&new_free_blk->free_block_entry, &large_free_blk->free_block_entry);
-	return false;
-}
-
-static void dhmp_free_one_block(struct ibv_mr* mr)
-{
-	struct dhmp_area* area;
-	int i,index;
-	bool res;
-	struct dhmp_free_block* free_blk;
-	
-	DEBUG_LOG("free one block %p size %d", mr->addr, mr->length);
-
-	list_for_each_entry(area, &server->area_list, area_entry)
-	{
-		if(mr->lkey==area->mr->lkey)
-			break;
-	}
-	
-	if((&area->area_entry) != (&server->area_list))
-	{
-		for(index=0; index<MAX_ORDER; index++)
-			if(mr->length==buddy_size[index])
-				break;
-			
-retry:
-		res=dhmp_recycle_free_block(area, &mr->addr, index);
-		if(res&&(index!=MAX_ORDER-1))
-		{
-			index+=1;
-			goto retry;
-		}
-		
-		for(i=MAX_ORDER-1;i>=0;i--)
-		{
-			if(!list_empty(&area->block_head[i].free_block_list))
-			{
-				area->max_index=i;
-				break;
-			}
-		}
-		
-		for ( i=0; i<MAX_ORDER; i++ )
-		{
-			list_for_each_entry(free_blk,
-							&area->block_head[i].free_block_list,
-							free_block_entry)
-			{
-				DEBUG_LOG("Index %d addr %p",i,free_blk->addr);
-			}
-		}
-		
-	}
-}
-
 static void dhmp_free_one_area(struct ibv_mr* mr)
 {
 	struct dhmp_area* area;
-	bool res;
 	void *addr;
 	
 	DEBUG_LOG("free one area %p size %d",mr->addr,mr->length);
@@ -594,40 +331,7 @@ static void dhmp_free_one_area(struct ibv_mr* mr)
 			break;
 	}
 	
-	if((&area->area_entry) != (&server->area_list))
-	{
-		res=dhmp_buddy_system_build(area);
-		if(res)
-		{
-			list_del(&area->area_entry);
-			area->max_index=MAX_ORDER-1;
-			list_add(&area->area_entry, &server->area_list);
-		}
-		else
-		{
-			list_del(&area->area_entry);
-			addr=area->mr->addr;
-			ibv_dereg_mr(area->mr);
-			free(addr);
-			free(area);
-		}
-	}
-}
-
-static void dhmp_free_more_area(struct ibv_mr* mr)
-{
-	struct dhmp_area* area;
-	void *addr;
-	
-	DEBUG_LOG("free more area %p size %d", mr->addr, mr->length);
-	
-	list_for_each_entry(area, &server->more_area_list, area_entry)
-	{
-		if(mr->lkey==area->mr->lkey)
-			break;
-	}
-	
-	if((&area->area_entry) != (&server->area_list))
+	if((&area->area_entry) != (&server->area_list[]))
 	{
 		list_del(&area->area_entry);
 		addr=area->mr->addr;
@@ -636,6 +340,7 @@ static void dhmp_free_more_area(struct ibv_mr* mr)
 		free(area);
 	}
 }
+
 
 static void dhmp_free_request_handler(struct dhmp_transport* rdma_trans, struct dhmp_msg* msg_ptr)
 {
@@ -648,12 +353,8 @@ static void dhmp_free_request_handler(struct dhmp_transport* rdma_trans, struct 
 	mr=&request_msg_ptr->mr;
 
 	rdma_trans->nvm_used_size-=mr->length;
-	if(mr->length<=buddy_size[MAX_ORDER-1])
-		dhmp_free_one_block(mr);
-	else if(mr->length<=SINGLE_AREA_SIZE)
-		dhmp_free_one_area(mr);
-	else
-		dhmp_free_more_area(mr);
+
+	dhmp_free_one_area(mr, rdma_trans);
 
 	free_res_msg.addr_info=request_msg_ptr->addr_info;
 	//free hash in server

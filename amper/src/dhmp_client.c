@@ -10,39 +10,13 @@
 #include "dhmp_client.h"
 struct dhmp_client *client=NULL;
 
-static struct dhmp_transport* dhmp_node_select() // 循环select
-{
-	int i;
-	
-	for(i=0; i<DHMP_SERVER_NODE_NUM; i++)
-	{
-		if(client->fifo_node_index>=DHMP_SERVER_NODE_NUM)
-			client->fifo_node_index=0;
-
-		if(client->connect_trans[client->fifo_node_index]!=NULL &&
-			(client->connect_trans[client->fifo_node_index]->trans_state==
-				DHMP_TRANSPORT_STATE_CONNECTED))
-		{
-			++client->fifo_node_index;
-			return client->connect_trans[client->fifo_node_index-1];
-		}
-
-		++client->fifo_node_index;
-	}
-	
-	return NULL;
-}
-
 struct dhmp_transport* dhmp_get_trans_from_addr(void *dhmp_addr)
 {
-	long long node_index=(long long)dhmp_addr;
-	node_index=node_index>>48;
-	return client->connect_trans[node_index];
+	return client->connect_trans;
 }
 
 void *dhmp_malloc(size_t length, int is_special)
 {
-	struct dhmp_transport *rdma_trans=NULL;
 	struct dhmp_malloc_work malloc_work;
 	struct dhmp_work *work;
 	struct dhmp_addr_info *addr_info;
@@ -54,8 +28,7 @@ void *dhmp_malloc(size_t length, int is_special)
 	}
 
 	/*select which node to alloc nvm memory*/
-	rdma_trans=dhmp_node_select();
-	if(!rdma_trans)
+	if(!client->connect_trans)
 	{
 		ERROR_LOG("don't exist remote server.");
 		goto out;
@@ -77,7 +50,7 @@ void *dhmp_malloc(size_t length, int is_special)
 	addr_info->nvm_mr.length=0;
 	
 	malloc_work.addr_info=addr_info;
-	malloc_work.rdma_trans=rdma_trans;
+	malloc_work.rdma_trans= client->connect_trans;
 	malloc_work.length=length;
 	malloc_work.done_flag=false;
 	malloc_work.is_special = is_special;
@@ -269,7 +242,7 @@ int amper_clover_compare_and_set(void *dhmp_addr)
 
 int amper_write_L5(void * local_buf, size_t count)
 {
-	struct dhmp_transport *rdma_trans= client->connect_trans[0]; // assume only one server
+	struct dhmp_transport *rdma_trans= client->connect_trans; // assume only one server
 	struct amper_L5_work wwork;
 	struct dhmp_work *work;
 
@@ -306,7 +279,7 @@ int amper_write_L5(void * local_buf, size_t count)
 
 int amper_scalable(size_t count, int write_type)
 {
-	struct dhmp_transport *rdma_trans= client->connect_trans[0]; // assume only one server
+	struct dhmp_transport *rdma_trans= client->connect_trans; // assume only one server
 	struct amper_scalable_work wwork;
 	struct dhmp_work *work;
 
@@ -343,7 +316,7 @@ int amper_scalable(size_t count, int write_type)
 
 int amper_sendRPC_Tailwind(size_t offset, void * local_buf, size_t count)
 {
-	struct dhmp_transport *rdma_trans= client->connect_trans[0]; // assume only one server
+	struct dhmp_transport *rdma_trans= client->connect_trans; // assume only one server
 	struct amper_Tailwind_work wwork;
 	struct dhmp_work *work;
 
@@ -385,7 +358,7 @@ int amper_sendRPC_Tailwind(size_t offset, void * local_buf, size_t count)
 
 int amper_write_Tailwind(size_t offset, void * local_buf, size_t count)
 {
-	struct dhmp_transport *rdma_trans= client->connect_trans[0]; // assume only one server
+	struct dhmp_transport *rdma_trans= client->connect_trans; // assume only one server
 	struct amper_Tailwind_work wwork;
 	struct dhmp_work *work;
 
@@ -424,7 +397,7 @@ int amper_write_Tailwind(size_t offset, void * local_buf, size_t count)
 
 int amper_sendRPC_DaRPC(void * local_buf, size_t count)
 {
-	struct dhmp_transport *rdma_trans= client->connect_trans[0]; // assume only one server
+	struct dhmp_transport *rdma_trans= client->connect_trans; // assume only one server
 	struct amper_DaRPC_work wwork;
 	struct dhmp_work *work;
 
@@ -476,7 +449,7 @@ int amper_sendRPC_DaRPC(void * local_buf, size_t count)
 
 int amper_RFP(struct ibv_mr * remote_mr, void * local_buf, size_t count, bool is_write)
 {
-	struct dhmp_transport *rdma_trans= client->connect_trans[0];
+	struct dhmp_transport *rdma_trans= client->connect_trans;
 	struct dhmp_RFP_work wwork;
 	struct dhmp_work *work;
 	if(!rdma_trans||rdma_trans->trans_state!=DHMP_TRANSPORT_STATE_CONNECTED)
@@ -896,22 +869,22 @@ void dhmp_client_init(size_t size,int obj_num)
 	for(i=0;i<client->config.nets_cnt;i++)
 	{
 		INFO_LOG("create the [%d]-th normal transport.",i);
-		client->connect_trans[i]=dhmp_transport_create(&client->ctx, 
+		client->connect_trans=dhmp_transport_create(&client->ctx, 
 														dhmp_get_dev_from_client(),
 														false,
 														false);
-		if(!client->connect_trans[i])
+		if(!client->connect_trans)
 		{
 			ERROR_LOG("create the [%d]-th transport error.",i);
 			continue;
 		}
-		client->connect_trans[i]->node_id=i;
+		client->connect_trans->node_id=i;
 #ifdef UD
-		dhmp_transport_connect_UD(client->connect_trans[i],
+		dhmp_transport_connect_UD(client->connect_trans,
 							client->config.net_infos[i].addr,
 							client->config.net_infos[i].port);
 #else
-		dhmp_transport_connect(client->connect_trans[i],
+		dhmp_transport_connect(client->connect_trans,
 							client->config.net_infos[i].addr,
 							client->config.net_infos[i].port);
 #endif
@@ -920,13 +893,13 @@ void dhmp_client_init(size_t size,int obj_num)
 	for(i=0;i<client->config.nets_cnt;i++)
 	{
 		if(i == 1) ERROR_LOG("more than one server or client");
-		if(client->connect_trans[i]==NULL)
+		if(client->connect_trans==NULL)
 			continue;
-		while(client->connect_trans[i]->trans_state<DHMP_TRANSPORT_STATE_CONNECTED);
+		while(client->connect_trans->trans_state<DHMP_TRANSPORT_STATE_CONNECTED);
 		client->per_ops_mr_addr = malloc(size+1024);//request+data
-		client->per_ops_mr =dhmp_create_smr_per_ops(client->connect_trans[i], client->per_ops_mr_addr, size+1024);
+		client->per_ops_mr =dhmp_create_smr_per_ops(client->connect_trans, client->per_ops_mr_addr, size+1024);
 		client->per_ops_mr_addr2 = malloc(size+1024);//request+data
-		client->per_ops_mr2 =dhmp_create_smr_per_ops(client->connect_trans[i], client->per_ops_mr_addr2, size+1024);
+		client->per_ops_mr2 =dhmp_create_smr_per_ops(client->connect_trans, client->per_ops_mr_addr2, size+1024);
 	}
 
 
@@ -984,15 +957,15 @@ void dhmp_client_destroy()
 #ifndef UD
 	for(i=0;i<client->config.nets_cnt;i++)
 	{
-		dhmp_close_connection(client->connect_trans[i]);
+		dhmp_close_connection(client->connect_trans);
 	}
 #endif
 	
 	for(i=0;i<client->config.nets_cnt;i++)
 	{
-		if(client->connect_trans[i]==NULL)
+		if(client->connect_trans==NULL)
 			continue;
-		while(client->connect_trans[i]->trans_state==DHMP_TRANSPORT_STATE_CONNECTED);
+		while(client->connect_trans->trans_state==DHMP_TRANSPORT_STATE_CONNECTED);
 	}
 
 
@@ -1000,7 +973,7 @@ void dhmp_client_destroy()
 	
 	INFO_LOG("client destroy start.");
 	pthread_join(client->ctx.epoll_thread, NULL);
-	rdma_leave_multicast(client->connect_trans[0]->cm_id, (struct sockaddr *)&(client->connect_trans[0]->peer_addr));
+	rdma_leave_multicast(client->connect_trans->cm_id, (struct sockaddr *)&(client->connect_trans->peer_addr));
 	INFO_LOG("client destroy end.");
 	
 	free(client);
@@ -1149,76 +1122,14 @@ void model_7_scalable(int accessnum, int *rand_num , size_t length, void * local
 }
 
 
-void *dhmp_malloc_messagebuffer(size_t length, int is_special)
-{
-	struct dhmp_transport *rdma_trans=NULL;
-	struct dhmp_malloc_work malloc_work;
-	struct dhmp_work *work;
-	struct dhmp_addr_info *addr_info;
-	
-	if(length<0)
-	{
-		ERROR_LOG("length is error.");
-		goto out;
-	}
-	/*select which node to alloc nvm memory*/
-	rdma_trans=dhmp_node_select();
-	if(!rdma_trans)
-	{
-		ERROR_LOG("don't exist remote server.");
-		goto out;
-	}
-
-	work=malloc(sizeof(struct dhmp_work));
-	if(!work)
-	{
-		ERROR_LOG("allocate memory error.");
-		goto out;
-	}
-	
-	addr_info=malloc(sizeof(struct dhmp_addr_info));
-	if(!addr_info)
-	{
-		ERROR_LOG("allocate memory error.");
-		goto out_work;
-	}
-	addr_info->nvm_mr.length=0;
-	
-	malloc_work.addr_info=addr_info;
-	malloc_work.rdma_trans=rdma_trans;
-	malloc_work.length=length;
-	malloc_work.done_flag=false;
-	malloc_work.is_special = is_special;
-
-	work->work_type=DHMP_WORK_MALLOC;
-	work->work_data=&malloc_work;
-
-	pthread_mutex_lock(&client->mutex_work_list);
-	list_add_tail(&work->work_entry, &client->work_list);
-	pthread_mutex_unlock(&client->mutex_work_list);
-	
-	while(!malloc_work.done_flag);
-
-	free(work);
-	
-	return malloc_work.res_addr;
-
-out_work:
-	free(work);
-out:
-	return NULL;
-}
-
 
 void send_UD(void* local_buf,size_t length )
 {
-	struct dhmp_transport *rdma_trans=NULL;
 	struct dhmp_UD_work wwork;
 	struct dhmp_work *work;
 
 	/*select which node to alloc nvm memory*/
-	rdma_trans=dhmp_node_select();
-	if(!rdma_trans)
+	if(!client->connect_trans)
 	{
 		ERROR_LOG("don't exist remote server.");
 		goto out;
@@ -1231,7 +1142,7 @@ void send_UD(void* local_buf,size_t length )
 		goto out;
 	}
 	
-	wwork.rdma_trans=rdma_trans;
+	wwork.rdma_trans = client->connect_trans;
 	wwork.length=length;
 	wwork.done_flag=false;
 	wwork.local_buf = local_buf;
@@ -1258,7 +1169,7 @@ void send_UD(void* local_buf,size_t length )
 		memcpy(temp, &req_msg ,sizeof(struct dhmp_UD_request));
 		memcpy(temp+ sizeof(struct dhmp_UD_request), wwork->local_buf ,wwork->length);
 		msg.data=temp;
-		amper_ud_post_send(wwork->rdma_trans, &msg);
+		amper_ud_post_send(client->connect_trans, &msg);
 	
 		/*wait for the server return result*/
 		while(wwork->recv_flag==false);

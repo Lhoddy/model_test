@@ -200,8 +200,6 @@ struct dhmp_UD_work{
 
 void *dhmp_work_handle_thread(void *data);
 int dhmp_hash_in_client(void *addr);
-void *dhmp_transfer_dhmp_addr(struct dhmp_transport *rdma_trans,
-									void *normal_addr);
 struct dhmp_addr_info *dhmp_get_addr_info_from_ht(int index, void *dhmp_addr);
 
 

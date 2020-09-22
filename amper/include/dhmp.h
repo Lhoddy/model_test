@@ -114,7 +114,6 @@ struct dhmp_msg{
 struct dhmp_addr_info{
 	int read_cnt;
 	int write_cnt;
-	int node_index;
 	bool write_flag;
 	struct ibv_mr nvm_mr;
 	struct hlist_node addr_entry;

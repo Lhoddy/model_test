@@ -295,8 +295,6 @@ struct dhmp_device *dhmp_get_dev_from_server(void);
 
 void *dhmp_malloc(size_t length, int is_special);
 
-void *dhmp_malloc_messagebuffer(size_t length, int is_special);
-
 /**
  *	dhmp_read:read the data from dhmp_addr, write into the local_buf
  */
