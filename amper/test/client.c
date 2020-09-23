@@ -91,7 +91,7 @@ int main(int argc,char *argv[])
 
 #ifdef octopus
 	for(i=0;i<objnum;i++)
-		addr[i]=dhmp_malloc(size,0);
+		addr[i]=dhmp_malloc(size+8,0); // 8 = point space for c&s
 	int j;
 	for(j=0;j<accessnum;j++)
 	{ 
@@ -102,42 +102,75 @@ int main(int argc,char *argv[])
 		dhmp_free(addr[i]);
 #endif
 #ifdef clover
-	dhmp_malloc(objnum,2); // clover c&s point
+	void * point[obj_num_max];
+	void * addr[accessnum];
 	for(i=0;i<objnum;i++)
-		addr[i]=dhmp_malloc(size,0);1
+		point[i]=malloc(8); // 8 = point space for c&s
+	for(i=0;i<accessnum;i++)
+		addr[i]=dhmp_malloc(size+8,0); // 8 = point space for c&s
+	dhmp_malloc(objnum,2); // clover c&s point
+
 	for(j=0;j<accessnum;j++)
 	{ 
 		i = j%objnum;
-		model_1_clover(addr[i], size, str, addr[rand_num[i]]);
+		model_1_clover(addr[j], size, str, point[rand_num[i]]);
 	}
 	for(i=0;i<objnum;i++)
+		dhmp_free(point[i]);
+	for(i=0;i<accessnum;i++)
 		dhmp_free(addr[i]);
 #endif
 #ifdef L5
+	for(i=0;i<objnum;i++)
+		addr[i]=dhmp_malloc(size,0);
 	dhmp_malloc(size,3); //for L5
 	for(j=0;j<accessnum;j++)
 	{ 
 		i = j%objnum;
-		model_5_L5(size, str);
+		model_5_L5(size, str, addr[rand_num[i]], 1); //1 for write
 	}
-#endif
-
-#ifdef DaRPC
-	dhmp_malloc(0,5); //DaRPC
-	model_3_DaRPC(accessnum, rand_num, size, str ); //用的默认的send recv queue
-	
-#endif
-#ifdef scalable
-	dhmp_malloc(size,7); //scalable
-	model_7_scalable(accessnum, rand_num, size, str);
-	
+	model_5_L5(size, str, addr[rand_num[i]], 0); //0 for read
+	for(i=0;i<objnum;i++)	
+		dhmp_free(addr[i]);
 #endif
 #ifdef RFP
+	for(i=0;i<objnum;i++)
+		addr[i]=dhmp_malloc(size,0);
 	dhmp_malloc(size,6); //RFP
 	for(j=0;j<accessnum;j++)
 	{ 
-		model_4_RFP(size, str);  
+		i = j%objnum;
+		model_4_RFP(size, str, addr[rand_num[i]], 1); //1 for write
 	}
+	for(i=0;i<objnum;i++)	
+		dhmp_free(addr[i]);
+#endif
+#ifdef DaRPC
+	for(i=0;i<objnum;i++)
+		addr[i]=dhmp_malloc(size,0);
+	dhmp_malloc(0,5); //DaRPC
+	for(j=0;j<accessnum;j++)
+	{ 
+		i = j%objnum;
+		model_3_DaRPC(size, str, addr[rand_num[i]], 1); //用的默认的send recv queue
+	}
+	
+	for(i=0;i<objnum;i++)	
+		dhmp_free(addr[i]);
+#endif
+
+
+#ifdef scalable
+	for(i=0;i<objnum;i++)
+		addr[i]=dhmp_malloc(size,0);
+	dhmp_malloc(size,7); //scalable
+	for(j=0;j<accessnum;j++)
+	{ 
+		i = j%objnum;
+		model_7_scalable(accessnum, rand_num, size, str);
+	}
+	for(i=0;i<objnum;i++)	
+		dhmp_free(addr[i]);
 #endif
 #ifdef FaSST
 //need #define UD
@@ -151,7 +184,8 @@ int main(int argc,char *argv[])
 	dhmp_malloc((size*objnum), 4); // for Tailwind
 	model_6_Tailwind(accessnum,objnum, rand_num, size, str); // only unif ，用的默认的send recv queue  
 #endif
-	
+
+
 	show("start count",&task_time_start);
 	show("over count",&task_time_end);
 	

@@ -68,6 +68,8 @@ struct dhmp_server{
 	struct  {
 		struct ibv_mr* mr;
 		void * addr;
+		struct ibv_mr C_mr;
+		struct dhmp_send_mr* reply_smr;
 	} L5_message[DHMP_CLIENT_NODE_NUM]; 
 	pthread_t L5_poll_thread;
 
@@ -88,6 +90,8 @@ struct dhmp_server{
 	struct{
 		struct ibv_mr* write_mr;
 		struct ibv_mr* read_mr;
+		pthread_t RFP_poll_thread;
+		char time;
 	}RFP[DHMP_CLIENT_NODE_NUM];
 
 	struct{

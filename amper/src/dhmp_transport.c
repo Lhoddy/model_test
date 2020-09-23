@@ -45,7 +45,9 @@ void amper_create_reply_ah(struct dhmp_transport* rdma_trans, struct ibv_wc *wc)
 
 void * nvm_malloc(size_t size)
 {
-	return malloc(size);//numa_alloc_onnode(length,3);
+	void *temp = malloc(size);
+	memset(temp , 0 , size);
+	return temp;//numa_alloc_onnode(length,3);
 }
 
 void nvm_free(void *addr)
@@ -189,10 +191,14 @@ static void dhmp_malloc_request_handler(struct dhmp_transport* rdma_trans,
 	}
 	else if(response.req_info.is_special == 3)// for L5
 	{
+		size_t data_size = 1048576; // 1MB or response.req_info.req_size + 16
+		memcpy(&(server->L5_message[rdma_trans->node_id].C_mr), &(response.req_info.mr) , sizeof(struct ibv_mr));
+		amper_allocspace_for_server(rdma_trans, 3, data_size); // L5
 		memcpy(&(response.mr), server->L5_mailbox.mr, sizeof(struct ibv_mr));
 		response.mr.addr += rdma_trans->node_id;
 		memcpy(&(response.mr2), server->L5_message[rdma_trans->node_id].mr, sizeof(struct ibv_mr));
-		memcpy(&(response.read_mr), server->L5_mailbox.read_mr, sizeof(struct ibv_mr));
+		// memcpy(&(response.read_mr), server->L5_mailbox.read_mr, sizeof(struct ibv_mr));
+		
 	}
 	else if(response.req_info.is_special == 4)// for tailwind
 	{
@@ -273,7 +279,8 @@ static void dhmp_malloc_response_handler(struct dhmp_transport* rdma_trans,
 	{
 		memcpy(&(client->L5.mailbox_mr), &response_msg.mr, sizeof(struct ibv_mr));
 		memcpy(&(client->L5.message_mr), &response_msg.mr2, sizeof(struct ibv_mr)); 
-		memcpy(&(client->L5.read_mr), &response_msg.read_mr, sizeof(struct ibv_mr)); 
+		// memcpy(&(client->L5.read_mr), &response_msg.read_mr, sizeof(struct ibv_mr)); 
+		client->L5.num_1 = 1; // for mailbox
 	}
 	else if(response_msg.req_info.is_special == 4)
 	{
@@ -288,6 +295,7 @@ static void dhmp_malloc_response_handler(struct dhmp_transport* rdma_trans,
 	{
 		memcpy(&(client->RFP.write_mr), &response_msg.mr, sizeof(struct ibv_mr));
 		memcpy(&(client->RFP.read_mr), &response_msg.mr2, sizeof(struct ibv_mr)); 
+		client->RFP.time = 1;
 	}
 	else if(response_msg.req_info.is_special == 7)
 	{
@@ -912,11 +920,6 @@ static int on_cm_connect_request(struct rdma_cm_event* event,
 	conn_param.initiator_depth = 1;
 #endif
 	
-	size_t data_size = 1048576; // 1MB req size
-	//#2 for L5
-	amper_allocspace_for_server(new_trans, 3, data_size); // L5
-	
-	//#2 for L5 
 
 #ifdef UD
 	conn_param.qp_num = new_trans->cm_id->qp->qp_num;
@@ -1551,8 +1554,7 @@ void dhmp_post_send(struct dhmp_transport* rdma_trans, struct dhmp_msg* msg_ptr)
 
 struct dhmp_send_mr* dhmp_create_smr_per_ops(struct dhmp_transport* rdma_trans, void* addr, int length )
 {
-	struct dhmp_send_mr *res,*tmp;
-	void* new_addr=NULL;
+	struct dhmp_send_mr *res;
 
 	res=(struct dhmp_send_mr* )malloc(sizeof(struct dhmp_send_mr));
 	if(!res)
@@ -1570,7 +1572,6 @@ struct dhmp_send_mr* dhmp_create_smr_per_ops(struct dhmp_transport* rdma_trans, 
 	}
 	
 	return res;
-
 error:
 	free ( res );
 	return NULL;
@@ -1582,12 +1583,10 @@ int dhmp_rdma_read(struct dhmp_transport* rdma_trans, struct ibv_mr* mr, void* l
 	struct dhmp_task* read_task;
 	struct ibv_send_wr send_wr,*bad_wr=NULL;
 	struct ibv_sge sge;
-	struct dhmp_send_mr* temp_mr=NULL;
+	struct dhmp_send_mr* smr=NULL;
 	int err=0;
-	
-	memcpy(client->per_ops_mr_addr,local_addr ,length);
-	temp_mr=client->per_ops_mr;
-	read_task=dhmp_read_task_create(rdma_trans, temp_mr, length);
+	smr = dhmp_create_smr_per_ops(rdma_trans, local_addr, length);
+	read_task=dhmp_read_task_create(rdma_trans, smr, length);
 	if ( !read_task )
 	{
 		ERROR_LOG ( "allocate memory error." );
@@ -1618,7 +1617,8 @@ int dhmp_rdma_read(struct dhmp_transport* rdma_trans, struct ibv_mr* mr, void* l
 	DEBUG_LOG("before local addr is %s", local_addr);
 	
 	while(!read_task->done_flag);
-		
+	ibv_dereg_mr(smr->mr);
+	free(smr);
 	DEBUG_LOG("local addr content is %s", local_addr);
 
 	return 0;
@@ -1626,35 +1626,40 @@ error:
 	return -1;
 }
 
-int dhmp_rdma_write ( struct dhmp_transport* rdma_trans, struct dhmp_addr_info *addr_info, struct ibv_mr* mr, void* local_addr, int length, int dram_flag )
+int dhmp_rdma_write ( struct dhmp_transport* rdma_trans, struct dhmp_addr_info *addr_info, struct ibv_mr* mr, void* local_addr, int length )
 {
 	struct dhmp_task* write_task;
-	struct dhmp_send_mr* temp_mr=NULL;
+	struct dhmp_send_mr* smr=NULL;
 	int err=0;
-
-	memcpy(client->per_ops_mr_addr,local_addr ,length);
-	temp_mr=client->per_ops_mr;
-	write_task=dhmp_write_task_create(rdma_trans, temp_mr, length);
+	smr = dhmp_create_smr_per_ops(rdma_trans, local_addr, length);
+	write_task=dhmp_write_task_create(rdma_trans, smr, length);
 	if(!write_task)
 	{
 		ERROR_LOG("allocate memory error.");
 		return -1;
 	}
 	write_task->addr_info=addr_info;
-	
 	amper_post_write(write_task, mr, write_task->sge.addr, write_task->sge.length, write_task->sge.lkey, false);
+	DEBUG_LOG("before read_test_mr addr is %s", client->per_ops_mr2->mr->addr);
+
+#ifdef FLUSH1
 	struct dhmp_task* read_task;
-	read_task=dhmp_read_task_create(rdma_trans, client->per_ops_mr2, length);
+	read_task=dhmp_read_task_create(rdma_trans, NULL, 0);
 	if ( !read_task )
 	{
 		ERROR_LOG ( "allocate memory error." );
 		return -1;
 	}
-	amper_post_read(read_task, mr, read_task->sge.addr, 0 ,read_task->sge.lkey, false);
+	amper_post_read(read_task, mr, NULL, 0 ,0, false);
+	while(!read_task->done_flag);
+	free(read_task);
+#endif
 
-	DEBUG_LOG("before read_test_mr addr is %s", client->per_ops_mr2->mr->addr);
 	while(!write_task->done_flag);
-	while(!read_task->done_flag);			
+			
+	ibv_dereg_mr(smr->mr);
+	free(smr);	
+	free(write_task);
 	DEBUG_LOG("read_test_mr addr content is %s", client->per_ops_mr2->mr->addr);
 	
 	return 0;

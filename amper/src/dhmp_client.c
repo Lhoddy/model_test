@@ -203,7 +203,7 @@ int dhmp_write(void *dhmp_addr, void * local_buf, size_t count)
 }
 
 
-int amper_clover_compare_and_set(void *dhmp_addr)
+int amper_clover_compare_and_set(void *dhmp_addr, size_t length, uintptr_t value)
 {
 	struct dhmp_transport *rdma_trans=NULL;
 	struct amper_clover_work wwork;
@@ -225,6 +225,8 @@ int amper_clover_compare_and_set(void *dhmp_addr)
 	wwork.done_flag=false;
 	wwork.dhmp_addr=dhmp_addr;
 	wwork.rdma_trans=rdma_trans;
+	wwork.length = length;
+	wwork.value =value;
 			
 	work->work_type=AMPER_WORK_CLOVER;
 	work->work_data=&wwork;
@@ -240,7 +242,7 @@ int amper_clover_compare_and_set(void *dhmp_addr)
 	return 0;
 }
 
-int amper_write_L5(void * local_buf, size_t count)
+int amper_write_L5( void * local_buf, size_t count, uintptr_t globle_addr, char flag_write);
 {
 	struct dhmp_transport *rdma_trans= client->connect_trans; // assume only one server
 	struct amper_L5_work wwork;
@@ -262,6 +264,8 @@ int amper_write_L5(void * local_buf, size_t count)
 	wwork.length=count;
 	wwork.local_addr=local_buf;
 	wwork.rdma_trans=rdma_trans;
+	wwork.dhmp_addr = globle_addr;
+	wwork.flag_write = flag_write;
 			
 	work->work_type=AMPER_WORK_L5;
 	work->work_data=&wwork;
@@ -447,7 +451,7 @@ int amper_sendRPC_DaRPC(void * local_buf, size_t count)
 }
 
 
-int amper_RFP(struct ibv_mr * remote_mr, void * local_buf, size_t count, bool is_write)
+int amper_RFP(void * local_buf, uintptr_t globle_addr, size_t count, bool is_write)
 {
 	struct dhmp_transport *rdma_trans= client->connect_trans;
 	struct dhmp_RFP_work wwork;
@@ -467,9 +471,9 @@ int amper_RFP(struct ibv_mr * remote_mr, void * local_buf, size_t count, bool is
 	wwork.done_flag=false;
 	wwork.length=count;
 	wwork.local_addr=local_buf;
-	wwork.remote_mr= remote_mr;
 	wwork.rdma_trans=rdma_trans;
 	wwork.is_write = is_write;
+	wwork.dhmp_addr = globle_addr;
 			
 	work->work_type=AMPER_WORK_RFP;
 	work->work_data=&wwork;
@@ -896,9 +900,12 @@ void dhmp_client_init(size_t size,int obj_num)
 		if(client->connect_trans==NULL)
 			continue;
 		while(client->connect_trans->trans_state<DHMP_TRANSPORT_STATE_CONNECTED);
-		client->per_ops_mr_addr = malloc(size+1024);//request+data
+		void * temp = malloc(8);
+		client->cas_mr = dhmp_create_smr_per_ops(client->connect_trans, temp, 8);
+
+		client->per_ops_mr_addr = zalloc(size+1024);//request+data
 		client->per_ops_mr =dhmp_create_smr_per_ops(client->connect_trans, client->per_ops_mr_addr, size+1024);
-		client->per_ops_mr_addr2 = malloc(size+1024);//request+data
+		client->per_ops_mr_addr2 = zalloc(size+1024);//request+data
 		client->per_ops_mr2 =dhmp_create_smr_per_ops(client->connect_trans, client->per_ops_mr_addr2, size+1024);
 	}
 
@@ -914,6 +921,12 @@ void dhmp_client_init(size_t size,int obj_num)
 	{//scalable
 		client->Salable.Creq_mr = client->per_ops_mr->mr;
 		client->Salable.Cdata_mr = client->per_ops_mr2->mr;
+	}
+	{//L5
+		client->L5.local_mr = client->per_ops_mr->mr;
+		size_t head_size = sizeof(uintptr_t) + sizeof(size_t)+1;
+		void *temp_head = malloc(head_size);
+		struct dhmp_send_mr* local_smr1 = dhmp_create_smr_per_ops(wwork->rdma_trans, temp_head, head_size);
 	}
 	client->para_request_num = 5;
 	
@@ -1035,26 +1048,44 @@ void model_1_octopus(void * globle_addr, size_t length, void * local_addr)
 {
 	void * server_addr = GetAddr_request1(globle_addr, length, NULL,NULL); //write imm and lock （imm=node_id+offset）
 	dhmp_write(server_addr, local_addr, length);
-	amper_clover_compare_and_set(globle_addr); //unlock perfile;we use object  todo
+	amper_clover_compare_and_set(globle_addr, length, NULL); //unlock perfile;we use object  todo
+}
+void model_1_octopus_R(void * globle_addr, size_t length, void * local_addr)
+{
+	void * server_addr = GetAddr_request1(globle_addr, length, NULL,NULL); //write imm and no_lock （imm=node_id+offset）
+	dhmp_read(server_addr, local_addr, length);
 }
 
-void model_1_clover(void * write_addr, size_t length, void * local_addr, void * cas_addr)//+globle_obj_name
+void model_1_clover(void * space_addr, size_t length, void * local_addr, uintptr_t* point_addr)//+globle_obj_name
 {
 	//8byte hander只够存放ptr,忽略GC元数据(8b)
 	//void * server_addr = GetAddr_request1(globle_addr, length, NULL,NULL); //write N次后RPC一次
-	dhmp_write(write_addr, local_addr, length);
-	amper_clover_compare_and_set(cas_addr);//+globle_obj_name
+	dhmp_write(space_addr, local_addr, length);// local_addr = data + 0
+	amper_clover_compare_and_set((void *)*point_addr, length, (uintptr_t)space_addr);//+globle_obj_name
+	memcpy(point_addr,&space_addr , sizeof(uintptr_t));
+}
+void model_1_clover_R(size_t length, void * local_addr, uintptr_t* point_addr)
+{
+	void * temp = malloc(length+8);
+	dhmp_read((void *)*point_addr, temp, length+8); // read data+point
+	while((uintptr_t)*(uintptr_t*)(temp+length) != 0) 
+	{	
+		//walk_chain; will not run when server_num = 1
+		dhmp_read((void *)*(uintptr_t*)(temp+length), temp, length+8);
+	}
 }
 
-void model_4_RFP( size_t length, void * local_addr)
+void model_4_RFP( size_t length, void * local_addr, uintptr_t globle_addr, char flag_write)
 {
-	amper_RFP(&client->RFP.write_mr, local_addr, length, true);   
-	// amper_RFP(&client->RFP.read_mr, local_addr, 256, false); //not need now  & no retry
+	if(flag_write == 1)		
+		amper_RFP(local_addr, globle_addr, length, true);   
+	else
+		amper_RFP(local_addr, globle_addr, length, false); 
 }
 
-void model_5_L5( size_t length, void * local_addr)
+void model_5_L5( size_t length, void * local_addr, uintptr_t globle_addr, char flag_write)
 {
-	amper_write_L5(local_addr, length);
+	amper_write_L5(local_addr, length, globle_addr, flag_write);
 }
 
 void model_3_herd(void * globle_addr, size_t length, void * local_addr)
@@ -1078,7 +1109,7 @@ void model_6_Tailwind(int accessnum, int obj_num, int *rand_num ,size_t length, 
 	amper_sendRPC_Tailwind(rand_num[i % obj_num], tailwind_data, count);
 }
 
-void model_3_DaRPC(int accessnum, int *rand_num , size_t length, void * local_addr) //server多线程未做
+void model_3_DaRPC( size_t length, void * local_addr, uintptr_t globle_addr, char flag_write) //server多线程未做
 {
 	int i = 0;
 	size_t count = sizeof(char) + sizeof(void*) + sizeof(size_t) + length;//to check
@@ -1094,7 +1125,7 @@ void model_3_DaRPC(int accessnum, int *rand_num , size_t length, void * local_ad
 void model_7_scalable(int accessnum, int *rand_num , size_t length, void * local_addr)
 {
 	int i = 0;
-	size_t write_length = sizeof(void *) + sizeof(size_t); // client_addr+req_size
+	size_t write_length =  BATCH *(sizeof(void *) + sizeof(size_t)); // client_addr+req_size
 	int * scalable_write_data = client->per_ops_mr_addr;
 
 	size_t totol_length = BATCH * (length + sizeof(void*) + sizeof(size_t) + 1);//(data+remote_addr+size+vaild )* batch
@@ -1106,16 +1137,7 @@ void model_7_scalable(int accessnum, int *rand_num , size_t length, void * local
 	{
 		scalable_write_data[0] = i;		
 		amper_scalable(write_length ,1); //  write + read & write
-		// int retry = 0;
 		while((int)(scalable_write_data[0]));
-		// {
-		// 	retry++;
-		// 	if(retry == 100)
-		// 	{
-		// 		amper_scalable(write_length ,1); //??????
-		// 		retry = 0;
-		// 	}
-		// }
 		amper_scalable(totol_length ,2); //  write 
 	}
 	

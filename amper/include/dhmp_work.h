@@ -13,7 +13,9 @@ struct dhmp_rw_work{
 struct amper_clover_work{
 	struct dhmp_transport *rdma_trans;
 	void *dhmp_addr;
+	size_t length;
 	bool done_flag;
+	uintptr_t value;
 };
 
 struct amper_L5_work{
@@ -21,6 +23,8 @@ struct amper_L5_work{
 	void *local_addr;
 	size_t length;
 	bool done_flag;
+	char flag_write;
+	uintptr_t dhmp_addr;
 };
 
 struct amper_Tailwind_work{
@@ -53,8 +57,8 @@ struct dhmp_RFP_work{
 	void *local_addr;
 	size_t length;
 	bool done_flag;
-	struct ibv_mr* remote_mr;
 	bool is_write;
+	uintptr_t dhmp_addr;
 };
 
 struct dhmp_rw2_work{

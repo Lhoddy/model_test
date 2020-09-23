@@ -288,11 +288,11 @@ int dhmp_read(void *dhmp_addr, void * local_buf, size_t count);
  */
 int dhmp_write(void *dhmp_addr, void * local_buf, size_t count);
 
-int amper_write_L5( void * local_buf, size_t count);
+int amper_write_L5( void * local_buf, size_t count, uintptr_t globle_addr, char flag_write);
 int amper_write_herd( void * local_buf, size_t count);
 int amper_write_Tailwind(size_t offset, void * local_buf, size_t count);
 
-int amper_clover_compare_and_set(void *dhmp_addr);
+int amper_clover_compare_and_set(void *dhmp_addr, size_t length, uintptr_t value);
 
 /**
  *	dhmp_free:release remote memory
@@ -337,11 +337,13 @@ void model_D_writeImm(void * server_addr, size_t length, void * local_addr);
 void model_D_send(void * server_addr, size_t length, void * local_addr);
 
 void model_1_octopus(void * globle_addr, size_t length, void * local_addr);
-void model_1_clover(void * write_addr, size_t length, void * local_addr, void * cas_addr);
-void model_4_RFP( size_t length, void * local_addr);
-void model_5_L5( size_t length, void * local_addr);
+void model_1_octopus_R(void * globle_addr, size_t length, void * local_addr);
+void model_1_clover(void * space_addr, size_t length, void * local_addr, uintptr_t * point_addr);
+void model_1_clover_R(size_t length, void * local_addr, uintptr_t* point_addr);
+void model_4_RFP( size_t length, void * local_addr, uintptr_t globle_addr, char flag_write);
+void model_5_L5( size_t length, void * local_addr, uintptr_t globle_addr, char flag_write);
 void model_6_Tailwind(int accessnum, int obj_num,int *rand_num , size_t length, void * local_addr);
-void model_3_DaRPC(int accessnum, int *rand_num ,size_t length, void * local_addr);
+void model_3_DaRPC( size_t length, void * local_addr, uintptr_t globle_addr, char flag_write);
 void model_7_scalable(int accessnum, int *rand_num , size_t length, void * local_addr);
 // void model_1_clover(void * globle_addr, size_t length, void * local_addr);
 

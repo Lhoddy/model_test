@@ -39,6 +39,8 @@ struct dhmp_client{
 	/*use for countint the num of sending server poll's packets*/
 	int poll_num;
 	
+	struct dhmp_send_mr* cas_mr;
+
 	struct dhmp_send_mr* per_ops_mr;
 	void * per_ops_mr_addr;
 	struct dhmp_send_mr* per_ops_mr2;
@@ -55,6 +57,8 @@ struct dhmp_client{
 		uint64_t num_1;
 		struct ibv_mr message_mr;
 		struct ibv_mr read_mr;
+		struct ibv_mr* local_mr;
+		struct dhmp_send_mr* local_smr1;
 	}L5;
 
 	struct{
@@ -69,6 +73,7 @@ struct dhmp_client{
 	struct{
 		struct ibv_mr write_mr;
 		struct ibv_mr read_mr;
+		char time;
 	}RFP;
 
 	struct{

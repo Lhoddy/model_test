@@ -160,6 +160,59 @@ void *model_C_Sread_run()
 	return NULL;
 }
 
+void amper_L5_request_handler(int node_id)
+{
+	void * context = server->L5_message[node_id].addr;
+	void * server_addr = (void*)*(uintptr_t *)context;
+	size_t size = (size_t)*(size_t *)(context + sizeof(uintptr_t));
+	char write_flag = (char)*(char *)(context + sizeof(uintptr_t) + sizeof(size_t));
+
+	void *temp = server->L5_message[node_id].reply_smr->mr->addr;
+	memcpy(temp, &size, sizeof(size_t));
+	size_t reply_size;
+	if(write_flag == 1)
+	{
+		memcpy(server_addr, context + sizeof(uintptr_t) + sizeof(size_t) + 1, size);
+		_mm_clflush(server_addr);
+		*(char *)(temp + sizeof(size_t)) = 1;
+		reply_size = sizeof(size_t) + 1;
+	}
+	else
+	{
+		memcpy(temp + sizeof(size_t), server_addr, size);
+		reply_siz e= sizeof(size_t) + size;
+	}
+
+	struct ibv_send_wr send_wr,*bad_wr=NULL;
+	memset(&send_wr, 0, sizeof(struct ibv_send_wr));
+	struct ibv_sge sge;
+	struct dhmp_task* task;
+	task = dhmp_write_task_create(server->connect_trans[node_id], NULL, 0);
+	if (!task )
+	{
+		ERROR_LOG ( "allocate memory error." );
+		return -1;
+	}
+	send_wr.wr_id= ( uintptr_t ) task;
+	send_wr.opcode=IBV_WR_RDMA_WRITE;
+	send_wr.sg_list=&sge;
+	send_wr.num_sge=1;
+	// send_wr.send_flags=IBV_SEND_SIGNALED;
+	send_wr.wr.rdma.remote_addr= ( uintptr_t ) server->L5_message[node_id].C_mr.addr;
+	send_wr.wr.rdma.rkey= server->L5_message[node_id].C_mr.rkey;
+	sge.addr= ( uintptr_t ) server->L5_message[node_id].reply_smr->mr->addr;
+	sge.length= reply_size;
+	sge.lkey= server->L5_message[node_id].reply_smr->mr->lkey;
+	int err=ibv_post_send ( task->rdma_trans->qp, &send_wr, &bad_wr );
+	if ( err )
+	{
+		ERROR_LOG("ibv_post_send error");
+		exit(-1);
+		return -1;
+	}	
+	return;
+}
+
 void *L5_run()
 {
 	INFO_LOG("start L5 epoll");
@@ -171,11 +224,61 @@ void *L5_run()
 		{
 			INFO_LOG("get new L5 message");
 			*((char *)(server->L5_mailbox.addr + i)) = 0;
-			//amper_L5_request_handler(); not need
+			amper_L5_request_handler(i);
 		}
 		i = (i+1) % server->client_num;
 	}
-	return NULL;
+	return;
+}
+
+void amper_RFP_request_handler(int node_id)
+{
+	void * context = server->RFP[node_id].write_mr->addr + 1;
+	char write_flag = (char)*(char *)context;
+	void * server_addr = (void*)*(uintptr_t *)(context+1);
+	size_t size = (size_t)*(size_t *)(context+1 + sizeof(uintptr_t));
+
+	void *temp = server->RFP[node_id].read_mr->addr;
+	memcpy(temp, &size, sizeof(size_t));
+	size_t reply_size;
+	if(write_flag == 1)
+	{
+		memcpy(server_addr, context + sizeof(uintptr_t) + sizeof(size_t) + 1, size);
+		_mm_clflush(server_addr);
+	}
+	else
+	{
+		memcpy(temp + sizeof(size_t)+2, server_addr, size);
+	}
+	if(server->RFP[node_id].time == 1)
+	{
+		*(char*)temp = 2;
+		server->RFP[node_id].time = 2;
+	}
+	else
+	{
+		*(char*)temp = 1;
+		server->RFP[node_id].time = 1;
+	}
+	return;
+}
+
+void *RFP_run(void* arg1)
+{
+	server->RFP[node_id].time = 2;
+	int i = *(int*) arg1;
+	INFO_LOG("start RFP epoll");
+	while(1)
+	{
+		if(server->RFP[node_id].write_mr == NULL) continue;
+		if((*((char *)(server->RFP[i].write_mr->addr))) != 0)
+		{
+			INFO_LOG("get new L5 message");
+			*((char *)(server->RFP[i].write_mr->addr)) = 0;
+			amper_RFP_request_handler(i);
+		}
+	}
+	return;
 }
 
 void amper_scalable_request_handler(int node_id, size_t size)
@@ -282,7 +385,6 @@ void dhmp_server_init()
 #endif
 	server->L5_mailbox.addr == NULL;
 
-
 #ifdef UD
 	err=dhmp_transport_listen_UD(server->listen_trans,
 					server->config.net_infos[server->config.curnet_id].port);
@@ -324,6 +426,10 @@ void dhmp_server_destroy()
 #ifdef L5
 	pthread_join(server->L5_poll_thread, NULL);
 #endif	
+#ifdef RFP
+	for(i =0;i<DHMP_CLIENT_NODE_NUM ;i++)
+		pthread_join(server->RFP_poll_thread[i], NULL);
+#endif	
 #ifdef scalable
 	for(i =0;i<DHMP_CLIENT_NODE_NUM ;i++)
 		pthread_join(server->scalable_poll_thread[i], NULL);
@@ -347,16 +453,17 @@ void amper_allocspace_for_server(struct dhmp_transport* rdma_trans, int is_speci
 				server->L5_mailbox.addr = nvm_malloc(DHMP_CLIENT_NODE_NUM*sizeof(char)); // store client num  
 				temp_smr = dhmp_create_smr_per_ops(rdma_trans, server->L5_mailbox.addr, DHMP_CLIENT_NODE_NUM*sizeof(char));
 				server->L5_mailbox.mr = temp_smr->mr;
-				temp = nvm_malloc(sizeof(char)); // store client num  
-				temp_smr = dhmp_create_smr_per_ops(rdma_trans, temp, sizeof(char));
-				server->L5_mailbox.read_mr = temp_smr->mr;
+				// temp = nvm_malloc(sizeof(char)); 
+				// temp_smr = dhmp_create_smr_per_ops(rdma_trans, temp, sizeof(char));
+				// server->L5_mailbox.read_mr = temp_smr->mr;
 			}
 			//only use server's first dev
 			server->L5_message[node_id].addr = nvm_malloc(size);
 			temp_smr = dhmp_create_smr_per_ops(rdma_trans, server->L5_message[node_id].addr, size);
 			server->L5_message[node_id].mr = temp_smr->mr;
 			INFO_LOG("L5 buffer %d %p is ready.",node_id,server->L5_mailbox.mr->addr);
-			
+			void * temp = malloc(size);
+			server->L5_message[node_id].reply_smr = dhmp_create_smr_per_ops(rdma_trans, temp , size);
 		}
 		break;
 		case 4: // for tailwind
@@ -386,6 +493,7 @@ void amper_allocspace_for_server(struct dhmp_transport* rdma_trans, int is_speci
 			temp = nvm_malloc(size); 
 			temp_smr = dhmp_create_smr_per_ops(rdma_trans, temp, size);
 			server->RFP[node_id].read_mr = temp_smr->mr;
+			pthread_create(&server->RFP[node_id].RFP_poll_thread, NULL, RFP_run, &node_id);
 		}
 		case 7: // for scalable
 		{
