@@ -36,9 +36,7 @@ struct dhmp_server{
 
 	struct dhmp_transport *listen_trans;
 	struct dhmp_transport *connect_trans[DHMP_CLIENT_NODE_NUM];
-
-	struct hlist_head addr_info_ht[DHMP_CLIENT_HT_SIZE];	
-
+	
 	struct list_head dev_list;
 	pthread_mutex_t mutex_client_list;
 	struct list_head client_list;
@@ -86,11 +84,12 @@ struct dhmp_server{
 
 	struct ibv_mr* read_mr;
 	struct dhmp_cq* DaRPC_dcq[DaRPC_clust_NUM];
+	char DaRPC_dcq_count[DaRPC_clust_NUM];
 
 	struct{
 		struct ibv_mr* write_mr;
 		struct ibv_mr* read_mr;
-		pthread_t RFP_poll_thread;
+		pthread_t poll_thread;
 		char time;
 	}RFP[DHMP_CLIENT_NODE_NUM];
 

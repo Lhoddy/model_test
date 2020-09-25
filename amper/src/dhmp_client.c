@@ -10,6 +10,23 @@
 #include "dhmp_client.h"
 struct dhmp_client *client=NULL;
 
+struct timespec time_start, time_end;
+unsigned long time_diff_ns;
+
+static void show(const char * str, struct timespec* time, char output)
+{
+	fprintf(stderr,str);	
+	fflush(stderr);
+	clock_gettime(CLOCK_MONOTONIC, time);	
+	if(output == 1)
+	{
+		time_diff_ns = ((time_end.tv_sec * 1000000000) + time_end.tv_nsec) -
+                        ((time_start.tv_sec * 1000000000) + time_start.tv_nsec);
+  		fprintf(stderr,"runtime %lf ms\n", (double)time_diff_ns/1000000);
+  		fflush(stderr);
+	}
+}
+
 struct dhmp_transport* dhmp_get_trans_from_addr(void *dhmp_addr)
 {
 	return client->connect_trans;
@@ -155,11 +172,8 @@ int dhmp_read(void *dhmp_addr, void * local_buf, size_t count)
 	pthread_mutex_unlock(&client->mutex_work_list);
 
 	while(!rwork.done_flag);
-	//INFO_LOG("free work start");
-		//INFO_LOG("wrok = %p !",con);
-		free(con);
-		//INFO_LOG("free");
-	//INFO_LOG("free over");
+	free(con);
+
 	return 0;
 }
 
@@ -242,7 +256,7 @@ int amper_clover_compare_and_set(void *dhmp_addr, size_t length, uintptr_t value
 	return 0;
 }
 
-int amper_write_L5( void * local_buf, size_t count, uintptr_t globle_addr, char flag_write);
+int amper_write_L5( void * local_buf, size_t count, uintptr_t globle_addr, char flag_write)
 {
 	struct dhmp_transport *rdma_trans= client->connect_trans; // assume only one server
 	struct amper_L5_work wwork;
@@ -399,7 +413,7 @@ int amper_write_Tailwind(size_t offset, void * local_buf, size_t count)
 }
 
 
-int amper_sendRPC_DaRPC(void * local_buf, size_t count)
+int amper_sendRPC_DaRPC(size_t length, void * local_addr, uintptr_t*  globle_addr, char flag_write , char batch) 
 {
 	struct dhmp_transport *rdma_trans= client->connect_trans; // assume only one server
 	struct amper_DaRPC_work wwork;
@@ -419,9 +433,12 @@ int amper_sendRPC_DaRPC(void * local_buf, size_t count)
 	}
 	wwork.done_flag=false;
 	wwork.recv_flag = false;
-	wwork.length=count;
-	wwork.local_addr=local_buf;
+	wwork.length= length;
+	wwork.local_addr=local_addr;
 	wwork.rdma_trans=rdma_trans;
+	wwork.globle_addr = globle_addr;
+	wwork.flag_write = flag_write;
+	wwork.batch = batch;
 			
 	work->work_type=AMPER_WORK_DaRPC;
 	work->work_data=&wwork;
@@ -851,9 +868,6 @@ void dhmp_client_init(size_t size,int obj_num)
 	INIT_LIST_HEAD(&client->dev_list);
 	dhmp_dev_list_init(&client->dev_list);
 
-	/*init FIFO node select algorithm*/
-	client->fifo_node_index=0;
-
 
 	/*init the addr hash table of client*/
 	for(i=0;i<DHMP_CLIENT_HT_SIZE;i++)
@@ -868,8 +882,6 @@ void dhmp_client_init(size_t size,int obj_num)
 
 	
 	/*init normal connection*/
-	memset(client->connect_trans, 0, DHMP_SERVER_NODE_NUM*
-										sizeof(struct dhmp_transport*));
 	for(i=0;i<client->config.nets_cnt;i++)
 	{
 		INFO_LOG("create the [%d]-th normal transport.",i);
@@ -903,9 +915,11 @@ void dhmp_client_init(size_t size,int obj_num)
 		void * temp = malloc(8);
 		client->cas_mr = dhmp_create_smr_per_ops(client->connect_trans, temp, 8);
 
-		client->per_ops_mr_addr = zalloc(size+1024);//request+data
+		client->per_ops_mr_addr = malloc(size+1024);//request+data
+		memset(client->per_ops_mr_addr, 0 ,size+1024);
 		client->per_ops_mr =dhmp_create_smr_per_ops(client->connect_trans, client->per_ops_mr_addr, size+1024);
-		client->per_ops_mr_addr2 = zalloc(size+1024);//request+data
+		client->per_ops_mr_addr2 = malloc(size+1024);//request+data
+		memset(client->per_ops_mr_addr2, 0 ,size+1024);
 		client->per_ops_mr2 =dhmp_create_smr_per_ops(client->connect_trans, client->per_ops_mr_addr2, size+1024);
 	}
 
@@ -923,10 +937,10 @@ void dhmp_client_init(size_t size,int obj_num)
 		client->Salable.Cdata_mr = client->per_ops_mr2->mr;
 	}
 	{//L5
-		client->L5.local_mr = client->per_ops_mr->mr;
+		client->local_mr = client->per_ops_mr->mr;
 		size_t head_size = sizeof(uintptr_t) + sizeof(size_t)+1;
 		void *temp_head = malloc(head_size);
-		struct dhmp_send_mr* local_smr1 = dhmp_create_smr_per_ops(wwork->rdma_trans, temp_head, head_size);
+		client->L5.local_smr1 = dhmp_create_smr_per_ops(client->connect_trans, temp_head, head_size);
 	}
 	client->para_request_num = 5;
 	
@@ -968,25 +982,16 @@ void dhmp_client_destroy()
 	int i;
 	INFO_LOG("send all disconnect start.");
 #ifndef UD
-	for(i=0;i<client->config.nets_cnt;i++)
-	{
-		dhmp_close_connection(client->connect_trans);
-	}
+	dhmp_close_connection(client->connect_trans);
 #endif
 	
-	for(i=0;i<client->config.nets_cnt;i++)
-	{
-		if(client->connect_trans==NULL)
-			continue;
-		while(client->connect_trans->trans_state==DHMP_TRANSPORT_STATE_CONNECTED);
-	}
+	while(client->connect_trans->trans_state==DHMP_TRANSPORT_STATE_CONNECTED);
 
 
 	client->ctx.stop=true;
 	
 	INFO_LOG("client destroy start.");
 	pthread_join(client->ctx.epoll_thread, NULL);
-	rdma_leave_multicast(client->connect_trans->cm_id, (struct sockaddr *)&(client->connect_trans->peer_addr));
 	INFO_LOG("client destroy end.");
 	
 	free(client);
@@ -1048,7 +1053,7 @@ void model_1_octopus(void * globle_addr, size_t length, void * local_addr)
 {
 	void * server_addr = GetAddr_request1(globle_addr, length, NULL,NULL); //write imm and lock （imm=node_id+offset）
 	dhmp_write(server_addr, local_addr, length);
-	amper_clover_compare_and_set(globle_addr, length, NULL); //unlock perfile;we use object  todo
+	amper_clover_compare_and_set(globle_addr, length, 0); //unlock perfile;we use object  todo
 }
 void model_1_octopus_R(void * globle_addr, size_t length, void * local_addr)
 {
@@ -1056,23 +1061,24 @@ void model_1_octopus_R(void * globle_addr, size_t length, void * local_addr)
 	dhmp_read(server_addr, local_addr, length);
 }
 
-void model_1_clover(void * space_addr, size_t length, void * local_addr, uintptr_t* point_addr)//+globle_obj_name
+void model_1_clover(void * space_addr, size_t length, void * local_addr, void * point_addr, int offset)//+globle_obj_name
 {
-	//8byte hander只够存放ptr,忽略GC元数据(8b)
-	//void * server_addr = GetAddr_request1(globle_addr, length, NULL,NULL); //write N次后RPC一次
+	void * temp = malloc(8);
+	dhmp_read(point_addr, temp, 8); // read data+point
+
 	dhmp_write(space_addr, local_addr, length);// local_addr = data + 0
-	amper_clover_compare_and_set((void *)*point_addr, length, (uintptr_t)space_addr);//+globle_obj_name
-	memcpy(point_addr,&space_addr , sizeof(uintptr_t));
+	amper_clover_compare_and_set(point_addr, length, (uintptr_t)0);//space_addr
+	// memcpy(point_addr,(uintptr_t)space_addr , sizeof(uintptr_t));
 }
-void model_1_clover_R(size_t length, void * local_addr, uintptr_t* point_addr)
+void model_1_clover_R(size_t length, void * local_addr, void* point_addr)
 {
 	void * temp = malloc(length+8);
-	dhmp_read((void *)*point_addr, temp, length+8); // read data+point
-	while((uintptr_t)*(uintptr_t*)(temp+length) != 0) 
-	{	
-		//walk_chain; will not run when server_num = 1
-		dhmp_read((void *)*(uintptr_t*)(temp+length), temp, length+8);
-	}
+	dhmp_read(point_addr, temp, length); // read data+point
+	// while((uintptr_t)*(uintptr_t*)(temp+length) != 0) 
+	// {	
+	// 	//walk_chain; will not run when server_num = 1
+	// 	dhmp_read((void *)*(uintptr_t*)(temp+length), temp, length+8);
+	// }
 }
 
 void model_4_RFP( size_t length, void * local_addr, uintptr_t globle_addr, char flag_write)
@@ -1099,26 +1105,21 @@ void model_6_Tailwind(int accessnum, int obj_num, int *rand_num ,size_t length, 
 	int i = 0;
 	size_t count = sizeof(size_t) + sizeof(uint32_t) + sizeof(uint32_t) + length;//(size_t+check+checksum+data)
 	char * tailwind_data = malloc(count);
-	// memcpy(tailwind_data,local_addr);
 
-	amper_sendRPC_Tailwind(rand_num[i++], tailwind_data, count);
+	*(size_t*)tailwind_data = length;
+	memcpy(tailwind_data + sizeof(size_t) + sizeof(uint32_t) + sizeof(uint32_t), local_addr, length);
+
+	amper_sendRPC_Tailwind(i++, tailwind_data, count);
 	for(; i < accessnum-1; i++)
 	{
-		amper_write_Tailwind(rand_num[i % obj_num], tailwind_data, count); 
+		amper_write_Tailwind(i % Tailwind_log_size, tailwind_data, count); 
 	}
-	amper_sendRPC_Tailwind(rand_num[i % obj_num], tailwind_data, count);
+	amper_sendRPC_Tailwind(i % Tailwind_log_size, tailwind_data, count);
 }
 
-void model_3_DaRPC( size_t length, void * local_addr, uintptr_t globle_addr, char flag_write) //server多线程未做
+void model_3_DaRPC(size_t length, void * local_addr, uintptr_t*  globle_addr, char flag_write , char batch) //server多线程未做
 {
-	int i = 0;
-	size_t count = sizeof(char) + sizeof(void*) + sizeof(size_t) + length;//to check
-	size_t totol_count = count * BATCH;
-	char * tailwind_data = malloc(totol_count);
-	memcpy(tailwind_data , &length, sizeof(size_t));
-
-	for(; i < accessnum; i = i + BATCH)
-		amper_sendRPC_DaRPC(tailwind_data, totol_count); //窗口异步 + read flush
+	amper_sendRPC_DaRPC(length, local_addr, globle_addr, flag_write , batch); //窗口异步 + read flush
 }
 
 //need  client->per_ops_mr_addr + client->per_ops_mr_addr2 > batch*reqsize

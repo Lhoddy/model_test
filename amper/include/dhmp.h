@@ -22,43 +22,32 @@
 #include "json-c/json.h"
 #include <x86intrin.h> 
 
-#define FLUSH
+#define FLUSH1
+
+#define DHMP_CLIENT_NODE_NUM 3
 
 
-//#define model_B
-// #define model_C
-
-#define DHMP_SERVER_DRAM_TH ((uint64_t)1024*1024*1024*1)
-
-#define DHMP_SERVER_NODE_NUM 3
-#define DHMP_CLIENT_NODE_NUM 20
-
-
-//#define DaRPC_SERVER
 #define DaRPC_clust_NUM  5
 #define BATCH 10
+#define Tailwind_log_size 100
 
-#define UD
+// #define UD
 
-// #define octopus
+
+//single
+#define octopus
 // #define clover
-// #define L5
+
+
+//both
+// #define L5 
+
+
 // #define Tailwind
 // #define DaRPC
+//#define DaRPC_SERVER
 // #define scalable
 // #define RFP
-
-
-#define DHMP_DEFAULT_SIZE 256
-#define DHMP_DEFAULT_POLL_TIME 800000000
-
-#define DHMP_MAX_OBJ_NUM 40000
-#define DHMP_MAX_CLIENT_NUM 100
-
-#define PAGE_SIZE 4096
-#define NANOSECOND (1000000000)
-
-#define DHMP_RTT_TIME (6000)
 
 #define max(a,b) (a>b?a:b)
 #define min(a,b) (a>b?b:a)
@@ -252,11 +241,14 @@ struct dhmp_TailwindRPC_response{
 
 struct dhmp_DaRPC_request{
 	size_t req_size;
+	void * local_addr;
 	void * task;
 };
 
 struct dhmp_DaRPC_response{
-	struct dhmp_TailwindRPC_request req_info;
+	struct dhmp_DaRPC_request req_info;
+	int write_flag;
+	int batch;
 };
 
 
@@ -338,12 +330,12 @@ void model_D_send(void * server_addr, size_t length, void * local_addr);
 
 void model_1_octopus(void * globle_addr, size_t length, void * local_addr);
 void model_1_octopus_R(void * globle_addr, size_t length, void * local_addr);
-void model_1_clover(void * space_addr, size_t length, void * local_addr, uintptr_t * point_addr);
-void model_1_clover_R(size_t length, void * local_addr, uintptr_t* point_addr);
+void model_1_clover(void * space_addr, size_t length, void * local_addr, void * point_addr,int offset);
+void model_1_clover_R(size_t length, void * local_addr, void* point_addr);
 void model_4_RFP( size_t length, void * local_addr, uintptr_t globle_addr, char flag_write);
 void model_5_L5( size_t length, void * local_addr, uintptr_t globle_addr, char flag_write);
 void model_6_Tailwind(int accessnum, int obj_num,int *rand_num , size_t length, void * local_addr);
-void model_3_DaRPC( size_t length, void * local_addr, uintptr_t globle_addr, char flag_write);
+void model_3_DaRPC( size_t length, void * local_addr, uintptr_t*  globle_addr, char flag_write , char batch);
 void model_7_scalable(int accessnum, int *rand_num , size_t length, void * local_addr);
 // void model_1_clover(void * globle_addr, size_t length, void * local_addr);
 

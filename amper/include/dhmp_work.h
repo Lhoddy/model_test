@@ -42,6 +42,9 @@ struct amper_DaRPC_work{
 	size_t length;
 	bool done_flag;
 	bool recv_flag;
+	uintptr_t*  globle_addr;
+	char flag_write ;
+	char batch;
 };
 
 

@@ -19,8 +19,8 @@ struct dhmp_simu_info{
 };
 
 struct dhmp_config{
-	struct dhmp_net_info net_infos[DHMP_SERVER_NODE_NUM];
-	struct dhmp_simu_info simu_infos[DHMP_SERVER_NODE_NUM];
+	struct dhmp_net_info net_infos[1];
+	struct dhmp_simu_info simu_infos[1];
 	int curnet_id;  //store the net_infos index of curnet
 	int nets_cnt;  //current include total server nodes
 	char watcher_addr[DHMP_ADDR_LEN];

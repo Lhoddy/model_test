@@ -46,6 +46,11 @@ struct dhmp_client{
 	struct dhmp_send_mr* per_ops_mr2;
 	void * per_ops_mr_addr2;
 
+	struct ibv_mr* local_mr;
+	struct ibv_mr read_mr_for_all;
+	pthread_mutex_t mutex_request_num;
+	int para_request_num;
+
 	struct  {
 		struct ibv_mr mr;
 		size_t length;
@@ -57,18 +62,14 @@ struct dhmp_client{
 		uint64_t num_1;
 		struct ibv_mr message_mr;
 		struct ibv_mr read_mr;
-		struct ibv_mr* local_mr;
 		struct dhmp_send_mr* local_smr1;
 	}L5;
 
 	struct{
 		struct ibv_mr mr;
-		struct ibv_mr read_mr;
 	}Tailwind_buffer;
 
-	struct ibv_mr read_mr;
-	pthread_mutex_t mutex_request_num;
-	int para_request_num;
+	
 
 	struct{
 		struct ibv_mr write_mr;
