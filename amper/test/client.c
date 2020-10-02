@@ -67,6 +67,8 @@ int main(int argc,char *argv[])
 	int objnum,accessnum, write_part;
 	struct timespec task_time_start, task_time_end;
 	unsigned long task_time_diff_ns;
+	char batch;
+	uintptr_t local_addr;
 	
 	if(argc<3)
 	{
@@ -96,7 +98,7 @@ int main(int argc,char *argv[])
 	for(i=0;i<objnum;i++)
 		addr[i]=dhmp_malloc(size+8,0); // 8 = point space for c&s
 	show("start count",&task_time_start);
-	
+	// dhmp_malloc(size,8); //似乎做不了
 	for(j=0;j<(accessnum /100 )* write_part ;j++)
 	{ 
 		i = j%objnum;
@@ -114,9 +116,9 @@ int main(int argc,char *argv[])
 		dhmp_free(addr[i]);
 #endif
 #ifdef clover
-	void * point;
+	uintptr_t point[obj_num_max];
+	memset(point , 0 , sizeof(uintptr_t) * obj_num_max);
 	void * addr[accessnum];
-	point=dhmp_malloc(8 * obj_num_max,0); // 8 = point space for c&s
 	for(i=0;i<accessnum;i++)
 		addr[i]=dhmp_malloc(size+8,0); // 8 = point space for c&s
 	//dhmp_malloc(objnum,2); // clover c&s point
@@ -125,17 +127,15 @@ int main(int argc,char *argv[])
 	for(j=0;j<(accessnum /100 )* write_part;j++)
 	{ 
 		i = j%objnum;
-		model_1_clover(addr[j], size, str, point,rand_num[i]);
+		model_1_clover(addr[j], size, str, point, rand_num[i]);
 	}
 	for(;j<accessnum;j++)
 	{ 
 		i = j%objnum;
-		model_1_clover_R(size, str, addr[i]);
+		model_1_clover_R(size, str, point[rand_num[i]]);
 	}
 
 	show("over count",&task_time_end);
-
-	dhmp_free(point);
 	for(i=0;i<accessnum;i++)
 		dhmp_free(addr[i]);
 #endif
@@ -163,6 +163,29 @@ int main(int argc,char *argv[])
 	for(i=0;i<objnum;i++)	
 		dhmp_free(addr[i]);
 #endif
+#ifdef FaRM
+	for(i=0;i<objnum;i++)
+		addr[i]=dhmp_malloc(size,0);
+	dhmp_malloc(size,8); //for FaRM
+
+	show("start count",&task_time_start);
+
+	for(j=0;j<(accessnum /100 )* write_part;j++)
+	{ 
+		i = j%objnum;
+		model_FaRM(str, size, addr[rand_num[i]], 1); //1 for write
+	}
+	for(;j<accessnum;j++)
+	{ 
+		i = j%objnum;
+		model_FaRM(str, size, addr[rand_num[i]], 0); //1 for write
+	}
+	show("over count",&task_time_end);
+
+	check_request();
+	for(i=0;i<objnum;i++)	
+		dhmp_free(addr[i]);
+#endif
 #ifdef RFP
 	for(i=0;i<objnum;i++)
 		addr[i]=dhmp_malloc(size,0);
@@ -186,66 +209,98 @@ int main(int argc,char *argv[])
 	for(i=0;i<objnum;i++)	
 		dhmp_free(addr[i]);
 #endif
+#ifdef Tailwind
+	show("start count",&task_time_start);
+	 // for Tailwind
+	model_6_Tailwind(accessnum, objnum, size, str); // only unif ，用的默认的send recv queue 
+	show("over count",&task_time_end); 
+#endif
+#ifdef scalable
+	 batch = BATCH;
+	for(i=0;i<objnum;i++)
+		addr[i]=dhmp_malloc(size,0);
+	dhmp_malloc(size,7); //scalable
+	uintptr_t remote_addr;
+	for(j=0;j<(accessnum /100 )* write_part;j++)
+	{ 
+		i = j%objnum;
+		local_addr = (uintptr_t)str;
+		remote_addr = (uintptr_t)addr[rand_num[i]];
+		model_7_scalable(&remote_addr, size, &local_addr, 1 , batch);
+	}
+	for(;j<accessnum;j++)
+	{ 
+		i = j%objnum;
+		local_addr = (uintptr_t)str;
+		remote_addr = (uintptr_t)addr[rand_num[i]];
+		model_7_scalable(&remote_addr, size, &local_addr, 0 , batch);
+	}
+	for(i=0;i<objnum;i++)	
+		dhmp_free(addr[i]);
+#endif
 #ifdef DaRPC
-	//need DaRPC_SERVER at dhmp.h only for server
+	//need DaRPC_SERVER at dhmp.h only for server if CQ cluster
 	for(i=0;i<objnum;i++)
 		addr[i]=dhmp_malloc(size,0);
 	dhmp_malloc(0,5); //DaRPC
-	char batch = 5;
+	batch = BATCH;
 	int k;
 	uintptr_t* temp = malloc(batch*sizeof(uintptr_t));
-
+	local_addr = (uintptr_t)str;
 	show("start count",&task_time_start);
-
 	for(j=0;j<(accessnum /100 )* write_part;j=j+batch)
 	{ 
 		i = j%objnum;
 		for(k = 0;k<batch;k++)
-			temp[k] = (uintptr_t*)addr[rand_num[(i+k)%objnum]];
-		model_3_DaRPC(size, str, temp, 1, batch); //用的默认的send recv queue
+			temp[k] = (uintptr_t)(addr[rand_num[(i+k)%objnum]]);
+		model_3_DaRPC(temp, size, &local_addr, 1 , batch);//用的默认的send recv queue
 	}
 	for(;j<accessnum;j=j+batch)
 	{ 
 		i = j%objnum;
 		for(k = 0;k<batch;k++)
-			temp[k] = (uintptr_t*)addr[rand_num[(i+k)%objnum]];
-		model_3_DaRPC(size, str, temp, 0, batch); //用的默认的send recv queue
+			temp[k] = (uintptr_t)(addr[rand_num[(i+k)%objnum]]);
+		model_3_DaRPC(temp, size, &local_addr, 0 , batch); //用的默认的send recv queue
 	}
 
 	show("over count",&task_time_end);
-
-	for(i=0;i<objnum;i++)	
-		dhmp_free(addr[i]);
-#endif
-#ifdef Tailwind
-	show("start count",&task_time_start);
-	dhmp_malloc((size*100), 4); // for Tailwind
-	model_6_Tailwind(accessnum,objnum, rand_num, size, str); // only unif ，用的默认的send recv queue 
-	show("over count",&task_time_end); 
-#endif
-
-
-
-#ifdef scalable
-	for(i=0;i<objnum;i++)
-		addr[i]=dhmp_malloc(size,0);
-	dhmp_malloc(size,7); //scalable
-	for(j=0;j<accessnum;j++)
-	{ 
-		i = j%objnum;
-		model_7_scalable(accessnum, rand_num, size, str);
-	}
 	for(i=0;i<objnum;i++)	
 		dhmp_free(addr[i]);
 #endif
 #ifdef FaSST
 //need #define UD
+	for(i=0;i<objnum;i++)
+		addr[i]=dhmp_malloc(size,0);
+	batch = 1;
+	int k;
+	uintptr_t* temp = malloc(batch*sizeof(uintptr_t));
+	local_addr = (uintptr_t)str;
+	show("start count",&task_time_start);
+	for(j=0;j<(accessnum /100 )* write_part;j=j+batch)
+	{ 
+		i = j%objnum;
+		for(k = 0;k<batch;k++)
+			temp[k] = (uintptr_t)addr[rand_num[(i+k)%objnum]];
+		send_UD(temp, size, &local_addr, 1 , batch);//用的默认的send recv queue
+	}
+	for(;j<accessnum;j=j+batch)
+	{ 
+		i = j%objnum;
+		for(k = 0;k<batch;k++)
+			temp[k] = (uintptr_t)addr[rand_num[(i+k)%objnum]];
+		send_UD(temp, size, &local_addr , 0 , batch); //用的默认的send recv queue
+	}
+
+	show("over count",&task_time_end);
+	for(i=0;i<objnum;i++)	
+		dhmp_free(addr[i]);
+#endif
+#ifdef herd
+//need #define UD
 	for(j=0;j<accessnum;j++)
 	{ 
-		send_UD(str,size);
 	}
 #endif
-
 
 	
 	task_time_diff_ns = ((task_time_end.tv_sec * 1000000000) + task_time_end.tv_nsec) -

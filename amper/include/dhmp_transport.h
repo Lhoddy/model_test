@@ -54,6 +54,7 @@ struct dhmp_transport{
 	/*the var use for two sided RDMA*/
 	struct dhmp_mr send_mr;
 	struct dhmp_mr recv_mr;
+	size_t send_recv_size;
 	
 	bool is_poll_qp;
 
@@ -69,7 +70,6 @@ struct dhmp_transport{
 
 struct dhmp_send_mr{
 	struct ibv_mr *mr;
-	struct list_head send_mr_entry;
 };
 
 struct dhmp_transport* dhmp_transport_create(struct dhmp_context* ctx, 
@@ -85,8 +85,8 @@ int dhmp_transport_connect(struct dhmp_transport* rdma_trans,
 
 int dhmp_transport_listen(struct dhmp_transport* rdma_trans, int listen_port);
 
-
-void dhmp_post_send(struct dhmp_transport* rdma_trans, struct dhmp_msg* msg_ptr);
+void amper_ud_post_send(struct dhmp_transport* rdma_trans, struct dhmp_msg* msg_ptr);
+struct dhmp_task * dhmp_post_send(struct dhmp_transport* rdma_trans, struct dhmp_msg* msg_ptr);
 
 struct dhmp_send_mr* dhmp_create_smr_per_ops(struct dhmp_transport* rdma_trans, void* addr, int length );
 

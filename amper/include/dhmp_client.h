@@ -57,6 +57,11 @@ struct dhmp_client{
 		size_t cur;
 	} ringbuffer;
 
+
+	struct{
+		struct ibv_mr* C_mr;
+	}octo;
+
 	struct{
 		struct ibv_mr mailbox_mr;
 		uint64_t num_1;
@@ -69,8 +74,6 @@ struct dhmp_client{
 		struct ibv_mr mr;
 	}Tailwind_buffer;
 
-	
-
 	struct{
 		struct ibv_mr write_mr;
 		struct ibv_mr read_mr;
@@ -82,7 +85,21 @@ struct dhmp_client{
 		struct ibv_mr Sdata_mr;
 		struct ibv_mr* Creq_mr;
 		struct ibv_mr* Cdata_mr;
+		char context_swith;
 	}Salable;
+
+
+	struct{
+		struct ibv_mr S_mr;
+		struct ibv_mr* C_mr;
+		int Scur;
+		int Ccur;
+		pthread_t poll_thread;
+		int is_available[FaRM_buffer_NUM];
+		size_t size;
+	}FaRM;
+	
+	
 };
 
 extern struct dhmp_client *client;

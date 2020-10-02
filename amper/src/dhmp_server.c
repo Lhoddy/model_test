@@ -84,6 +84,7 @@ struct dhmp_area *dhmp_area_create(size_t length)
 	}
 
 	area->mr=mr;
+	area->size = length;
 
 		list_add(&area->area_entry, &server->area_list[0]);
 	
@@ -94,7 +95,7 @@ out_area:
 out_mr:
 	ibv_dereg_mr(mr);
 out_addr:
-	free(addr);
+	nvm_free(addr, length);
 	return NULL;
 }
 
@@ -124,7 +125,7 @@ struct ibv_mr * dhmp_malloc_poll_area(size_t length)
 	if(!mr)
 	{
 		ERROR_LOG("ib register mr error.");
-		free(addr);
+		nvm_free(addr, length);
 		return NULL;
 	}
 	// server->ringbufferAddr = addr;
@@ -163,24 +164,26 @@ void amper_L5_request_handler(int node_id)
 {
 	void * context = server->L5_message[node_id].addr;
 	void * server_addr = (void*)*(uintptr_t *)context;
-	size_t size = (size_t)*(size_t *)(context + sizeof(uintptr_t));
+	size_t size = *(size_t *)(context + sizeof(uintptr_t));
 	char write_flag = (char)*(char *)(context + sizeof(uintptr_t) + sizeof(size_t));
 
 	void *temp = server->L5_message[node_id].reply_smr->mr->addr;
-	memcpy(temp, &size, sizeof(size_t));
-	size_t reply_size;
+	size_t reply_size= 0;
 	if(write_flag == 1)
 	{
 		memcpy(server_addr, context + sizeof(uintptr_t) + sizeof(size_t) + 1, size);
 		_mm_clflush(server_addr);
-		*(char *)(temp + sizeof(size_t)) = 1;
+		*(char *)temp = 1;
+		temp += 1;
 		reply_size = sizeof(size_t) + 1;
 	}
 	else
 	{
-		memcpy(temp + sizeof(size_t), server_addr, size);
+		memcpy(temp, server_addr, size);
+		temp += size;
 		reply_size= sizeof(size_t) + size;
 	}
+	memcpy(temp, &size, sizeof(size_t));
 
 	struct ibv_send_wr send_wr,*bad_wr=NULL;
 	memset(&send_wr, 0, sizeof(struct ibv_send_wr));
@@ -192,24 +195,12 @@ void amper_L5_request_handler(int node_id)
 		ERROR_LOG ( "allocate memory error." );
 		return ;
 	}
-	send_wr.wr_id= ( uintptr_t ) task;
-	send_wr.opcode=IBV_WR_RDMA_WRITE;
-	send_wr.sg_list=&sge;
-	send_wr.num_sge=1;
-	send_wr.send_flags=IBV_SEND_SIGNALED;
-	send_wr.wr.rdma.remote_addr= ( uintptr_t ) server->L5_message[node_id].C_mr.addr;
-	send_wr.wr.rdma.rkey= server->L5_message[node_id].C_mr.rkey;
-	sge.addr= ( uintptr_t ) server->L5_message[node_id].reply_smr->mr->addr;
-	sge.length= reply_size;
-	sge.lkey= server->L5_message[node_id].reply_smr->mr->lkey;
-	int err=ibv_post_send ( task->rdma_trans->qp, &send_wr, &bad_wr );
-	if ( err )
-	{
-		ERROR_LOG("ibv_post_send error %s",strerror(err));
-		exit(-1);
-		return ;
-	}	
+	*(uintptr_t *)(server->L5_message[node_id].addr) = 0;
+	amper_post_write(task, &(server->L5_message[node_id].C_mr), 
+		server->L5_message[node_id].reply_smr->mr->addr, reply_size, server->L5_message[node_id].reply_smr->mr->lkey, false); 
 	while(!task->done_flag);
+	
+	server->L5_message[node_id].is_new = true;
 	free(task);
 	return;
 }
@@ -232,33 +223,105 @@ void *L5_run()
 	return;
 }
 
-void amper_RFP_request_handler(int node_id)
+void *L5_flush2_run(void* arg1)
 {
-	void * context = server->RFP[node_id].write_mr->addr + 1;
+	int node_id = *(int*) arg1;
+	uintptr_t now;
+	INFO_LOG("start L5 epoll");
+	int i;
+	while(1)
+	{
+		if(server->L5_message[node_id].addr == NULL) continue;
+		now = *(uintptr_t *)(server->L5_message[node_id].addr);
+		while(server->L5_message[node_id].is_new != true);
+		while(now == 0);
+		INFO_LOG("get new L5 FLUSH2 message");
+		struct dhmp_task* task;
+		task = dhmp_write_task_create(server->connect_trans[node_id], NULL, 0);
+		if (!task )
+		{
+			ERROR_LOG ( "allocate memory error." );
+			return ;
+		}
+		char num_1 = 1;
+		amper_post_write(task, &(server->L5_message[node_id].C_mr), (uint64_t *)&(num_1), sizeof(char), 0, true); 
+		while(!task->done_flag);
+		free(task);
+		server->L5_message[node_id].is_new = false;
+	}
+	return;
+}
+
+static char check_valid(char *data, size_t size)
+{
+	int i = 0;
+	for(; i<size ;i++)
+		if(data[i] != 0)
+			return 1;
+	return 0;
+}
+
+void *tailwind_flush2_run(void* arg1)
+{
+	int node_id = *(int*) arg1;
+	size_t size = *(size_t*) (arg1 + sizeof(int));
+	INFO_LOG("start tailwind epoll");
+	int i;
+	while(1)
+	{
+		for(i = 1;i < Tailwind_log_size-1;i++)
+		{
+			void * temp = server->Tailwind_buffer[node_id].addr;
+			while( check_valid(temp + i*size , size) == 0);
+
+			INFO_LOG("get new tailwind FLUSH2 message");
+			struct dhmp_task* task;
+			task = dhmp_write_task_create(server->connect_trans[node_id], NULL, 0);
+			if (!task )
+			{
+				ERROR_LOG ( "allocate memory error." );
+				return ;
+			}
+			char num_1 = 1;
+			amper_post_write(task, &(server->Tailwind_buffer[node_id].flush2_mr), (uint64_t*)&(num_1), sizeof(char), 0, true); 
+			while(!task->done_flag);
+			free(task);
+		}
+	}
+	return;
+}
+
+
+
+void amper_RFP_request_handler(int node_id , size_t size)
+{
+	void * context = server->RFP[node_id].write_mr->addr + size;
 	char write_flag = (char)*(char *)context;
 	void * server_addr = (void*)*(uintptr_t *)(context+1);
-	size_t size = (size_t)*(size_t *)(context+1 + sizeof(uintptr_t));
 
 	void *temp = server->RFP[node_id].read_mr->addr;
-	memcpy(temp, &size, sizeof(size_t));
+	memcpy(temp + 1, &size, sizeof(size_t));
 	size_t reply_size;
 	if(write_flag == 1)
 	{
-		memcpy(server_addr, context + sizeof(uintptr_t) + sizeof(size_t) + 1, size);
+		memcpy(server_addr, server->RFP[node_id].write_mr->addr, size);
 		_mm_clflush(server_addr);
+		temp = temp + sizeof(size_t) + 1;
 	}
 	else
 	{
-		memcpy(temp + sizeof(size_t)+2, server_addr, size);
+		memcpy(temp + sizeof(size_t) + 1, server_addr, size);
+		temp = temp + sizeof(size_t) + 1 + size;
 	}
+
 	if(server->RFP[node_id].time == 1)
 	{
-		*(char*)temp = 2;
+		*(char*)temp = 1;
 		server->RFP[node_id].time = 2;
 	}
 	else
 	{
-		*(char*)temp = 1;
+		*(char*)temp = 2;
 		server->RFP[node_id].time = 1;
 	}
 	return;
@@ -267,35 +330,183 @@ void amper_RFP_request_handler(int node_id)
 void *RFP_run(void* arg1)
 {
 	int node_id = *(int*) arg1;
-	server->RFP[node_id].time = 2;
+	size_t size = server->RFP[node_id].size;
+	server->RFP[node_id].time = 1;
 	INFO_LOG("start RFP epoll");
 	while(1)
 	{
 		if(server->RFP[node_id].write_mr == NULL) continue;
-		if((*((char *)(server->RFP[node_id].write_mr->addr))) != 0)
+		char * poll_addr = server->RFP[node_id].write_mr->addr + size + sizeof(uintptr_t) +sizeof(size_t) +1;
+		if(*poll_addr != 0)
 		{
 			INFO_LOG("get new RFP message");
-			amper_RFP_request_handler(node_id);
-			*((char *)(server->RFP[node_id].write_mr->addr)) = 0;
+			amper_RFP_request_handler(node_id,size);
+			*poll_addr = 0;
 			
 		}
+		if(server->RFP[node_id].time == 0)
+			break;
 	}
 	return;
 }
 
-void amper_scalable_request_handler(int node_id, size_t size)
-{
-	struct dhmp_task* scalable_task;
-	scalable_task = dhmp_read_task_create(server->connect_trans[node_id], NULL, 0);
-	if(!scalable_task)
-	{
-		ERROR_LOG("allocate memory error.");
-		return;
-	}
-	amper_post_read(scalable_task, &(server->Salable[node_id].Cdata_mr), server->Salable[node_id].Sdata_mr->addr, size, server->Salable[node_id].Sdata_mr->lkey, false);
-	while(!scalable_task->done_flag);
-	_mm_clflush(server->Salable[node_id].Sdata_mr->addr);
 
+
+
+void *FaRM_run(void* arg1)
+{
+	int node_id = *(int*) arg1;
+	int i = 0;
+	INFO_LOG("start FaRM_run epoll");
+	char * reply, * valid;
+	char write_flag;
+	void* local_addr,*server_addr;
+	size_t size =  server->FaRM[node_id].size;
+	size_t buffer_size = sizeof(uintptr_t)*2 + sizeof(size_t) + 2 + size;
+	reply = server->FaRM[node_id].S_mr->addr + size;
+	valid = reply + (sizeof(uintptr_t)*2 + sizeof(size_t) + 1);
+	while(1)
+	{
+		if(*valid == 0)
+			continue;
+		*valid = 0;
+		INFO_LOG("get new FaRM messge");
+		server_addr = (void*)*(uintptr_t*)reply;
+		local_addr = (void*)*(uintptr_t*)(reply + sizeof(uintptr_t));
+		write_flag = *(reply + sizeof(uintptr_t)*2 + sizeof(size_t));
+
+		size_t reply_size = sizeof(uintptr_t)*2 + sizeof(size_t) + 2;
+		if(write_flag == 0)
+			reply_size += size;
+		
+		void *temp = malloc(reply_size);
+		struct dhmp_send_mr*  local_smr = dhmp_create_smr_per_ops(server->connect_trans[node_id], temp, reply_size);
+		
+		if(write_flag == 1)
+		{
+			memcpy(server_addr, server->FaRM[node_id].S_mr->addr + i * buffer_size, size);
+			_mm_clflush(server_addr);
+		}
+		else
+		{
+			memcpy(temp, server_addr, size);
+			temp += size;
+		}
+		
+		*(uintptr_t*) temp = (uintptr_t)server_addr;
+		*(uintptr_t*)(temp + sizeof(uintptr_t)) = (uintptr_t)local_addr;
+		*(size_t*)(temp + sizeof(uintptr_t)*2) = size;
+		*(char*)(temp + sizeof(uintptr_t)*2 + sizeof(size_t)) = write_flag;
+		*(char*)(temp + sizeof(uintptr_t)*2 + sizeof(size_t) + 1) = 1; //valid
+
+		struct dhmp_task* task;
+		task = dhmp_write_task_create(server->connect_trans[node_id], NULL, 0);
+		if (!task )
+		{
+			ERROR_LOG ( "allocate memory error." );
+			return ;
+		}
+		struct ibv_send_wr send_wr,*bad_wr=NULL;
+		struct ibv_sge sge;
+		struct dhmp_send_mr* temp_mr=NULL;
+		memset(&send_wr, 0, sizeof(struct ibv_send_wr));
+		send_wr.wr_id= ( uintptr_t ) task;
+		send_wr.opcode=IBV_WR_RDMA_WRITE;
+		send_wr.sg_list=&sge;
+		send_wr.num_sge=1;
+		send_wr.send_flags=IBV_SEND_SIGNALED;
+		send_wr.wr.rdma.remote_addr= ( uintptr_t ) server->FaRM[node_id].C_mr.addr + (i * buffer_size);
+		if(write_flag == 1)
+			send_wr.wr.rdma.remote_addr += size;
+		send_wr.wr.rdma.rkey= server->FaRM[node_id].C_mr.rkey;
+		sge.addr= ( uintptr_t )local_smr->mr->addr;
+		sge.length= reply_size;
+		sge.lkey= local_smr->mr->lkey;
+		int err=ibv_post_send ( task->rdma_trans->qp, &send_wr, &bad_wr );
+		if ( err )
+		{
+			ERROR_LOG("ibv_post_send error");
+			exit(-1);
+			return ;
+		}	
+		while(!task->done_flag);
+		free(task);
+		ibv_dereg_mr(local_smr->mr);
+		free(local_smr);
+
+		i = (i + 1) % FaRM_buffer_NUM;
+		reply = server->FaRM[node_id].S_mr->addr + size + (i * buffer_size);
+		valid = reply + (sizeof(uintptr_t)*2 + sizeof(size_t) + 1);
+	}
+
+	return;
+}
+
+void amper_scalable_request_handler(int node_id, char batch, char write_flag)
+{
+	int i;
+	void * temp,*temp2, * server_addr;
+	char * addr = server->Salable[node_id].Sreq_mr->addr;
+	size_t size;
+	temp2 = server->Salable[node_id].Sdata_mr->addr;
+		
+	if(write_flag /10 == 1)
+	{
+		struct dhmp_task* scalable_task;
+		scalable_task = dhmp_read_task_create(server->connect_trans[node_id], NULL, 0);
+		if(!scalable_task)
+		{
+			ERROR_LOG("allocate memory error.");
+			return;
+		}
+		size = *(size_t*)(addr+2);
+		size_t read_size;
+		if(write_flag%10 == 1)
+			read_size = batch * (sizeof(uintptr_t)+sizeof(size_t) + size);
+		else
+			read_size = batch * (sizeof(uintptr_t)+sizeof(size_t));
+		amper_post_read(scalable_task, (struct ibv_mr*)(addr+2+sizeof(size_t)), 
+				server->Salable[node_id].Slocal_mr->addr, read_size, server->Salable[node_id].Slocal_mr->lkey, false);
+		while(!scalable_task->done_flag);
+		temp = server->Salable[node_id].Slocal_mr->addr;
+		*(char *)temp2 = batch;
+		*(char *)(temp2+1) = write_flag;
+		temp2 += 2;
+		for(i =0;i<batch;i++)
+		{
+			server_addr = (void*)*(uintptr_t *)temp;
+			temp = temp + sizeof(uintptr_t) + sizeof(size_t);
+			if(write_flag%10 == 1)  {memcpy(server, temp, size); temp += size;}
+			_mm_clflush(server_addr);
+			*(uintptr_t*)temp2 = (uintptr_t)server_addr;
+			*(size_t*)(temp2+sizeof(uintptr_t)) = size;
+			temp2 = temp2 + sizeof(uintptr_t) + sizeof(size_t);
+			if(write_flag%10 == 0)  {memcpy(temp2, server, size); temp2 += size;}
+		}
+	}
+	else
+	{
+		temp = addr+2;
+		*(char *)temp2 = batch;
+		*(char *)(temp2+1) = write_flag;
+		temp2 += 2;
+		size = *(size_t*)(temp + sizeof(uintptr_t));
+		for(i =0;i<batch;i++)
+		{
+			server_addr = (void*)*(uintptr_t *)temp;
+			temp = temp + sizeof(uintptr_t) + sizeof(size_t);
+			if(write_flag%10 == 1)  {memcpy(server, temp, size); temp += size;}
+			_mm_clflush(server_addr);
+			*(uintptr_t*)temp2 = (uintptr_t)server_addr;
+			*(size_t*)(temp2+sizeof(uintptr_t)) = size;
+			temp2 = temp2 + sizeof(uintptr_t) + sizeof(size_t);
+			if(write_flag%10 == 0)  {memcpy(temp2, server, size); temp2 += size;}
+		}
+	}
+	size_t write_size;		
+	write_size = 2 + batch * (sizeof(uintptr_t) + sizeof(size_t));	
+	if(write_flag%10 != 1)
+		write_size += batch * size;	
 	struct dhmp_task* scalable_task2;
 	scalable_task2 = dhmp_write_task_create(server->connect_trans[node_id], NULL, 0);
 	if(!scalable_task2)
@@ -303,9 +514,11 @@ void amper_scalable_request_handler(int node_id, size_t size)
 		ERROR_LOG("allocate memory error.");
 		return;
 	}
-	uint64_t num = 0;
-	amper_post_write(scalable_task2, &(server->Salable[node_id].Creq_mr), &num, sizeof(uint64_t), 0, true);
+	amper_post_write(scalable_task2, &(server->Salable[node_id].Cdata_mr), 
+		server->Salable[node_id].Sdata_mr->addr, write_size, server->Salable[node_id].Sdata_mr->lkey, false);
 	while(!scalable_task2->done_flag);
+	
+	
 	return;
 }
 
@@ -313,17 +526,18 @@ void *scalable_run(void* arg1)
 {
 	int node_id = *(int*) arg1;
 	INFO_LOG("start scalable %d epoll", node_id);
-	int * addr = server->Salable[node_id].Sreq_mr->addr;
+	char * addr = server->Salable[node_id].Sreq_mr->addr;
 	int i = 0;
 	while(1)
 	{
-		if((int)addr[0])
+		if(addr[0])
 		{
+			INFO_LOG("get new scalable batch = %d message", (char)addr[0]);
+			amper_scalable_request_handler(node_id, *(addr), *(addr+1)); 
 			addr[0] = 0;
-			INFO_LOG("get new scalable %d message", (int)addr[0]);
-			amper_scalable_request_handler(node_id, *(size_t*)(addr+4)); 
-			
 		}
+		if(server->Salable[node_id].Slocal_mr == NULL)
+			break;
 	}
 	return ;
 }
@@ -383,6 +597,10 @@ void dhmp_server_init()
 	}	
 #endif
 	server->L5_mailbox.addr = NULL;
+	for(i=0; i<DHMP_CLIENT_NODE_NUM; i++)
+	{
+		server->Tailwind_buffer[i].addr = NULL;
+	}
 
 #ifdef UD
 	err=dhmp_transport_listen_UD(server->listen_trans,
@@ -457,19 +675,35 @@ void amper_allocspace_for_server(struct dhmp_transport* rdma_trans, int is_speci
 				// server->L5_mailbox.read_mr = temp_smr->mr;
 			}
 			//only use server's first dev
-			server->L5_message[node_id].addr = nvm_malloc(size);
-			temp_smr = dhmp_create_smr_per_ops(rdma_trans, server->L5_message[node_id].addr, size);
+			server->L5_message[node_id].addr = nvm_malloc(size+18);
+			temp_smr = dhmp_create_smr_per_ops(rdma_trans, server->L5_message[node_id].addr, size+18);
 			server->L5_message[node_id].mr = temp_smr->mr;
 			INFO_LOG("L5 buffer %d %p is ready.",node_id,server->L5_mailbox.mr->addr);
 			void * temp = malloc(size + sizeof(size_t));
 			server->L5_message[node_id].reply_smr = dhmp_create_smr_per_ops(rdma_trans, temp , size + sizeof(size_t));
+#ifdef FLUSH2
+			server->L5_message[node_id].is_new = true;
+			pthread_create(&server->L5_flush2_poll_thread[node_id], NULL, L5_flush2_run, &node_id);
+#endif
 		}
 		break;
 		case 4: // for tailwind
 		{
-			server->Tailwind_buffer[node_id].addr = nvm_malloc(10*1024*1024); 
-			temp_smr = dhmp_create_smr_per_ops(rdma_trans, server->Tailwind_buffer[node_id].addr, 10*1024*1024);
+			if(server->Tailwind_buffer[node_id].addr != NULL)
+			{
+				ibv_dereg_mr(server->Tailwind_buffer[node_id].mr);
+				nvm_free(server->Tailwind_buffer[node_id].addr, size);
+			}
+			server->Tailwind_buffer[node_id].addr = nvm_malloc(size); 
+			temp_smr = dhmp_create_smr_per_ops(rdma_trans, server->Tailwind_buffer[node_id].addr, size);
 			server->Tailwind_buffer[node_id].mr = temp_smr->mr;
+			free(temp_smr);//!!!!!!!!!!!!!!!
+#ifdef FLUSH2
+			struct {int node_id;size_t size;} data;
+			data.node_id = node_id;
+			data.size = size;
+			pthread_create(&server->Tailwind_buffer[node_id].poll_thread, NULL, tailwind_flush2_run, &data);
+#endif
 		}
 		break;
 		case 5: // for DaRPC only need once
@@ -481,29 +715,44 @@ void amper_allocspace_for_server(struct dhmp_transport* rdma_trans, int is_speci
 		break;
 		case 6: // for RFP
 		{
-			temp = nvm_malloc(size); 
-			temp_smr = dhmp_create_smr_per_ops(rdma_trans, temp, size);
+			temp = nvm_malloc(size + 24); 
+			temp_smr = dhmp_create_smr_per_ops(rdma_trans, temp, size + 24);
 			server->RFP[node_id].write_mr = temp_smr->mr;
 
-			temp = nvm_malloc(size); 
-			temp_smr = dhmp_create_smr_per_ops(rdma_trans, temp, size);
+			temp = nvm_malloc(size + 24); 
+			temp_smr = dhmp_create_smr_per_ops(rdma_trans, temp, size + 24);
 			server->RFP[node_id].read_mr = temp_smr->mr;
+			server->RFP[node_id].size = size;
 			pthread_create(&server->RFP[node_id].poll_thread, NULL, RFP_run, &node_id);
 		}
 		break;
 		case 7: // for scalable
 		{
-			size_t write_length = sizeof(void *) + sizeof(size_t); // client_addr+req_size  
-			size_t totol_length = BATCH * (size + sizeof(void*) + sizeof(size_t) + 1);//(data+remote_addr+size+vaild )* batch
-			temp = nvm_malloc(write_length); 
-			memset(temp, 0 ,write_length);
-			temp_smr = dhmp_create_smr_per_ops(rdma_trans, temp, write_length);
+			int batch = BATCH; 
+			size_t totol_length = 1 + 1 + batch *(sizeof(uintptr_t) + sizeof(size_t) + size); // batch + writeORread + readmr  
+			temp = nvm_malloc(totol_length); 
+			memset(temp, 0 ,totol_length);
+			temp_smr = dhmp_create_smr_per_ops(rdma_trans, temp, totol_length);
 			server->Salable[node_id].Sreq_mr = temp_smr->mr;
 
 			temp = nvm_malloc(totol_length); 
 			temp_smr = dhmp_create_smr_per_ops(rdma_trans, temp, totol_length);
 			server->Salable[node_id].Sdata_mr = temp_smr->mr;
+
+			temp = nvm_malloc(totol_length); 
+			temp_smr = dhmp_create_smr_per_ops(rdma_trans, temp, totol_length);
+			server->Salable[node_id].Slocal_mr = temp_smr->mr;
 			pthread_create(&(server->scalable_poll_thread[node_id]), NULL, scalable_run, &node_id);
+		}
+		break;
+		case 8: // for FaRM
+		{
+			size_t totol_length = 1 + 1 + sizeof(uintptr_t)*2 + sizeof(size_t) + size; // batch + writeORread + readmr  
+			temp = nvm_malloc(totol_length * FaRM_buffer_NUM); 
+			temp_smr = dhmp_create_smr_per_ops(rdma_trans, temp, totol_length * FaRM_buffer_NUM);
+			server->FaRM[node_id].S_mr = temp_smr->mr;
+			server->FaRM[node_id].size = size;
+			pthread_create(&(server->FaRM[node_id].poll_thread), NULL, FaRM_run, &node_id);
 		}
 		break;
 	};

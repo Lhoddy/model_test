@@ -21,6 +21,7 @@ struct dhmp_free_block_head{
 struct dhmp_area{
 	//pthread_spinlock_t mutex_area;
 	struct ibv_mr *mr;
+	size_t size;
 	struct list_head area_entry;
 };
 struct dhmp_tasklist{
@@ -58,6 +59,13 @@ struct dhmp_server{
 
 	int client_num;
 
+	struct{
+		struct ibv_mr C_mr;
+		void * new_addr;
+		void * new_addr1;
+		pthread_t poll_thread;
+	}octo[DHMP_CLIENT_NODE_NUM];
+
 	struct  {
 		struct ibv_mr* mr;
 		void * addr;
@@ -68,13 +76,16 @@ struct dhmp_server{
 		void * addr;
 		struct ibv_mr C_mr;
 		struct dhmp_send_mr* reply_smr;
+		bool is_new;
 	} L5_message[DHMP_CLIENT_NODE_NUM]; 
 	pthread_t L5_poll_thread;
+	pthread_t L5_flush2_poll_thread[DHMP_CLIENT_NODE_NUM];
 
 	struct  {
 		struct ibv_mr* mr;
 		void * addr;
-		struct ibv_mr* read_mr;
+		struct ibv_mr flush2_mr;
+		pthread_t poll_thread;
 	} Tailwind_buffer[DHMP_CLIENT_NODE_NUM];
 
 	struct  {
@@ -91,6 +102,7 @@ struct dhmp_server{
 		struct ibv_mr* read_mr;
 		pthread_t poll_thread;
 		char time;
+		size_t size;
 	}RFP[DHMP_CLIENT_NODE_NUM];
 
 	struct{
@@ -98,8 +110,16 @@ struct dhmp_server{
 		struct ibv_mr* Sdata_mr;
 		struct ibv_mr Creq_mr;
 		struct ibv_mr Cdata_mr;
+		struct ibv_mr* Slocal_mr;
 	}Salable[DHMP_CLIENT_NODE_NUM];
 	pthread_t scalable_poll_thread[DHMP_CLIENT_NODE_NUM];
+
+	struct{
+		struct ibv_mr C_mr;
+		struct ibv_mr* S_mr;
+		pthread_t poll_thread;
+		size_t size;
+	}FaRM[DHMP_CLIENT_NODE_NUM];
 };
 
 extern struct dhmp_server *server;

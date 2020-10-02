@@ -22,32 +22,46 @@
 #include "json-c/json.h"
 #include <x86intrin.h> 
 
-#define FLUSH1
+//#define FLUSH1 FLUSH1
+// #define FLUSH2 FLUSH2
 
 #define DHMP_CLIENT_NODE_NUM 3
 
 
-#define DaRPC_clust_NUM  5
-#define BATCH 10
-#define Tailwind_log_size 100
+// #define NVM NVM
 
-// #define UD
+#define DaRPC_clust_NUM  5
+#define BATCH 1
+#define Tailwind_log_size 100
+#define FaRM_buffer_NUM 5
+
+// #define UD UD
 
 
 //single
-#define octopus
-// #define clover
+//#define octopus octopus
 
+// #define clover clover
+
+// #define Tailwind Tailwind
 
 //both
-// #define L5 
 
+#define L5 L5
 
-// #define Tailwind
-// #define DaRPC
-//#define DaRPC_SERVER
-// #define scalable
-// #define RFP
+#define FaRM FaRM
+
+// #define RFP RFP
+
+// #define FaSST FaSST
+// #define UD UD
+
+// #define DaRPC DaRPC
+//#define DaRPC_SERVER DaRPC_SERVER
+
+// #define scalable scalable
+#define Sca1e_Swith_Time 100
+
 
 #define max(a,b) (a>b?a:b)
 #define min(a,b) (a>b?b:a)
@@ -241,7 +255,7 @@ struct dhmp_TailwindRPC_response{
 
 struct dhmp_DaRPC_request{
 	size_t req_size;
-	void * local_addr;
+	uintptr_t * local_addr;
 	void * task;
 };
 
@@ -254,11 +268,14 @@ struct dhmp_DaRPC_response{
 
 struct dhmp_UD_request{
 	size_t req_size;
+	uintptr_t * local_addr;
 	void * task;
 };
 
 struct dhmp_UD_response{
 	struct dhmp_UD_request req_info;
+	int write_flag;
+	int batch;
 };
 
 
@@ -280,11 +297,11 @@ int dhmp_read(void *dhmp_addr, void * local_buf, size_t count);
  */
 int dhmp_write(void *dhmp_addr, void * local_buf, size_t count);
 
-int amper_write_L5( void * local_buf, size_t count, uintptr_t globle_addr, char flag_write);
+int amper_write_L5( void * local_buf, size_t count, void * globle_addr, char flag_write);
 int amper_write_herd( void * local_buf, size_t count);
-int amper_write_Tailwind(size_t offset, void * local_buf, size_t count);
+int amper_write_Tailwind(size_t offset, struct ibv_mr*head_mr, size_t head_size , void * local_buf, size_t size);
 
-int amper_clover_compare_and_set(void *dhmp_addr, size_t length, uintptr_t value);
+int amper_clover_compare_and_set(void *dhmp_addr, size_t length, uint64_t value);
 
 /**
  *	dhmp_free:release remote memory
@@ -316,7 +333,7 @@ void dhmp_server_destroy();
 int dhmp_send(void *dhmp_addr, void * local_buf, size_t count, bool is_write);
 
 void * nvm_malloc(size_t size);
-void nvm_free(void *addr);
+void nvm_free(void *addr, size_t size);
 
 void model_A_write(void * globle_addr, size_t length, void * local_addr);
 void model_A_writeImm(void * globle_addr, size_t length, void * local_addr);
@@ -330,14 +347,15 @@ void model_D_send(void * server_addr, size_t length, void * local_addr);
 
 void model_1_octopus(void * globle_addr, size_t length, void * local_addr);
 void model_1_octopus_R(void * globle_addr, size_t length, void * local_addr);
-void model_1_clover(void * space_addr, size_t length, void * local_addr, void * point_addr,int offset);
-void model_1_clover_R(size_t length, void * local_addr, void* point_addr);
+void model_1_clover(void * space_addr, size_t length, void * local_addr, uintptr_t* point_addr,int offset);
+void model_1_clover_R(size_t length, void * local_addr, void* dhmp_addr);
 void model_4_RFP( size_t length, void * local_addr, uintptr_t globle_addr, char flag_write);
-void model_5_L5( size_t length, void * local_addr, uintptr_t globle_addr, char flag_write);
-void model_6_Tailwind(int accessnum, int obj_num,int *rand_num , size_t length, void * local_addr);
-void model_3_DaRPC( size_t length, void * local_addr, uintptr_t*  globle_addr, char flag_write , char batch);
-void model_7_scalable(int accessnum, int *rand_num , size_t length, void * local_addr);
-// void model_1_clover(void * globle_addr, size_t length, void * local_addr);
+void model_5_L5( size_t length, void * local_addr, void*  globle_addr, char flag_write);
+void model_6_Tailwind(int accessnum, int obj_num , size_t length, void * local_addr);
+void model_3_DaRPC( uintptr_t * globle_addr , size_t length, uintptr_t * local_addr, char flag_write, char batch);
+void model_7_scalable( uintptr_t * globle_addr , size_t length, uintptr_t * local_addr, char flag_write, char batch);
 
-void send_UD(void* local_buf,size_t length );
+void model_FaRM( void * local_buf, size_t count, void * globle_addr, char flag_write);
+
+void send_UD(uintptr_t * globle_addr , size_t length, uintptr_t * local_addr, char flag_write, char batch);
 #endif

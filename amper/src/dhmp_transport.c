@@ -28,9 +28,9 @@ static void dhmp_post_recv(struct dhmp_transport* rdma_trans, void *addr);
 static void dhmp_post_all_recv(struct dhmp_transport *rdma_trans);
 bool dhmp_destroy_dram_entry(void *nvm_addr);
 
-void amper_create_reply_ah(struct dhmp_transport* rdma_trans, struct ibv_wc *wc)
+void amper_create_reply_ah(struct dhmp_transport* rdma_trans, struct ibv_wc *wc)//single
 {
-	if(server == NULL && rdma_trans->ah == NULL) return;
+	if(server == NULL ||( server != NULL && rdma_trans->ah != NULL)) return;
 	struct ibv_qp_attr attr;
 	struct ibv_qp_init_attr init_attr;
 	rdma_trans->ah = ibv_create_ah_from_wc(rdma_trans->device->pd, wc, (void*)rdma_trans->recv_mr.addr,
@@ -45,13 +45,21 @@ void amper_create_reply_ah(struct dhmp_transport* rdma_trans, struct ibv_wc *wc)
 
 void * nvm_malloc(size_t size)
 {
-	void *temp = malloc(size);
+	void *temp;
+#ifdef NVM
+	temp = numa_alloc_onnode(size,2);
+#else
+	temp = malloc(size);
+#endif
 	memset(temp , 0 , size);
-	return temp;//numa_alloc_onnode(length,3);
+	return temp;//numa_alloc_onnode(size,2);
 }
 
-void nvm_free(void *addr)
+void nvm_free(void *addr, size_t size)
 {
+#ifdef NVM
+	return numa_free(addr,size);
+#endif
 	return free(addr);
 }
 
@@ -202,7 +210,8 @@ static void dhmp_malloc_request_handler(struct dhmp_transport* rdma_trans,
 	}
 	else if(response.req_info.is_special == 4)// for tailwind
 	{
-		amper_allocspace_for_server(rdma_trans, 4, response.req_info.req_size); 
+		memcpy(&(server->Tailwind_buffer[rdma_trans->node_id].flush2_mr), &(response.req_info.mr) , sizeof(struct ibv_mr));
+		amper_allocspace_for_server(rdma_trans, 4, (response.req_info.req_size * Tailwind_log_size)); 
 		memcpy(&(response.mr), server->Tailwind_buffer[rdma_trans->node_id].mr, sizeof(struct ibv_mr));
 	}
 	else if(response.req_info.is_special == 5) // for DaRPC
@@ -212,7 +221,7 @@ static void dhmp_malloc_request_handler(struct dhmp_transport* rdma_trans,
 	}
 	else if(response.req_info.is_special == 6)// for RFP
 	{
-		amper_allocspace_for_server(rdma_trans, 6, response.req_info.req_size + 16); 
+		amper_allocspace_for_server(rdma_trans, 6, response.req_info.req_size); 
 		memcpy(&(response.mr), server->RFP[rdma_trans->node_id].write_mr, sizeof(struct ibv_mr));
 		memcpy(&(response.mr2), server->RFP[rdma_trans->node_id].read_mr, sizeof(struct ibv_mr));
 	}
@@ -223,6 +232,12 @@ static void dhmp_malloc_request_handler(struct dhmp_transport* rdma_trans,
 		memcpy(&(server->Salable[rdma_trans->node_id].Cdata_mr), &(response.req_info.mr2) , sizeof(struct ibv_mr));
 		memcpy(&(response.mr), server->Salable[rdma_trans->node_id].Sreq_mr, sizeof(struct ibv_mr));
 		memcpy(&(response.mr2), server->Salable[rdma_trans->node_id].Sdata_mr, sizeof(struct ibv_mr));
+	}
+	else if(response.req_info.is_special == 8)// for FaRM
+	{
+		amper_allocspace_for_server(rdma_trans, 8, response.req_info.req_size); 
+		memcpy(&(server->FaRM[rdma_trans->node_id].C_mr), &(response.req_info.mr) , sizeof(struct ibv_mr));
+		memcpy(&(response.mr), server->FaRM[rdma_trans->node_id].S_mr, sizeof(struct ibv_mr));
 	}
 	else
 	{
@@ -237,8 +252,11 @@ static void dhmp_malloc_request_handler(struct dhmp_transport* rdma_trans,
 	res_msg.msg_type=DHMP_MSG_MALLOC_RESPONSE;
 	res_msg.data_size=sizeof(struct dhmp_mc_response);
 	res_msg.data=&response;
-	dhmp_post_send(rdma_trans, &res_msg);
-
+#ifdef UD
+	amper_ud_post_send(rdma_trans, &res_msg); 
+#else
+	dhmp_post_send ( rdma_trans, &res_msg );
+#endif
 	rdma_trans->nvm_used_size+=response.mr.length;
 	return ;
 
@@ -247,8 +265,12 @@ req_error:
 	res_msg.msg_type=DHMP_MSG_MALLOC_ERROR;
 	res_msg.data_size=sizeof(struct dhmp_mc_response);
 	res_msg.data=&response;
-
+#ifdef UD
+	amper_ud_post_send(rdma_trans, &res_msg); 
+#else
 	dhmp_post_send ( rdma_trans, &res_msg );
+#endif
+	
 
 	return ;
 }
@@ -298,6 +320,18 @@ static void dhmp_malloc_response_handler(struct dhmp_transport* rdma_trans,
 	{
 		memcpy(&(client->Salable.Sreq_mr), &response_msg.mr, sizeof(struct ibv_mr));
 		memcpy(&(client->Salable.Sdata_mr), &response_msg.mr2, sizeof(struct ibv_mr)); 
+		client->Salable.context_swith = 0;
+	}
+	else if(response_msg.req_info.is_special == 8)// for FaRM
+	{
+		memcpy(&(client->FaRM.S_mr), &response_msg.mr, sizeof(struct ibv_mr));
+		client->FaRM.size = response_msg.req_info.req_size;
+		client->FaRM.Scur = 0;
+		client->FaRM.Ccur = 0;
+		int i;
+		for(i = 0;i < FaRM_buffer_NUM;i++)
+			client->FaRM.is_available[i] = 1;
+		pthread_create(&(client->FaRM.poll_thread), NULL, FaRM_run_client, NULL);
 	}
 	else{
 		addr_info=response_msg.req_info.addr_info;
@@ -327,7 +361,7 @@ static void dhmp_free_one_area(struct ibv_mr* mr, struct dhmp_transport* rdma_tr
 {
 	struct dhmp_area* area;
 	void *addr;
-	
+	size_t size;
 	DEBUG_LOG("free one area %p size %d",mr->addr,mr->length);
 	
 	list_for_each_entry(area, &server->area_list[rdma_trans->node_id], area_entry)
@@ -340,8 +374,9 @@ static void dhmp_free_one_area(struct ibv_mr* mr, struct dhmp_transport* rdma_tr
 	{
 		list_del(&area->area_entry);
 		addr=area->mr->addr;
+		size = area->size;
 		ibv_dereg_mr(area->mr);
-		free(addr);
+		nvm_free(addr, size);
 		free(area);
 	}
 }
@@ -377,8 +412,12 @@ out:
 	res_msg.msg_type=DHMP_MSG_FREE_RESPONSE;
 	res_msg.data_size=sizeof(struct dhmp_free_response);
 	res_msg.data=&free_res_msg;
-
+#ifdef UD
+	amper_ud_post_send(rdma_trans, &res_msg); 
+#else
 	dhmp_post_send(rdma_trans, &res_msg);
+#endif
+
 	
 }
 
@@ -492,7 +531,7 @@ static void dhmp_wc_success_handler(struct ibv_wc* wc)
 	task_ptr=(struct dhmp_task*)(uintptr_t)wc->wr_id;
 	void * message_cxt = task_ptr->sge.addr;
 #ifdef UD
-	message_cxt += 40;
+	:qp += 40;
 #endif
 	rdma_trans=task_ptr->rdma_trans;
 	if(wc->opcode == IBV_WC_RECV)
@@ -527,7 +566,7 @@ static void dhmp_wc_success_handler(struct ibv_wc* wc)
 			dhmp_post_recv(rdma_trans, task_ptr->sge.addr);
 			break;
 		case IBV_WC_RDMA_WRITE:
-#ifdef model_B
+#ifdef FaRM
 #else
 			if(task_ptr->addr_info != NULL)
 				task_ptr->addr_info->write_flag=false;
@@ -686,7 +725,7 @@ static int amper_ud_qp_create(struct dhmp_transport* rdma_trans)
 	qp_init_attr.recv_cq=dcq->cq;
 
 	qp_init_attr.cap.max_send_wr=1500;
-	qp_init_attr.cap.max_send_sge=1;
+	qp_init_attr.cap.max_send_sge=2;
 
 	qp_init_attr.cap.max_recv_wr=1500;
 	qp_init_attr.cap.max_recv_sge=1;
@@ -750,7 +789,7 @@ static int dhmp_qp_create(struct dhmp_transport* rdma_trans)
 	qp_init_attr.recv_cq=dcq->cq;
 
 	qp_init_attr.cap.max_send_wr=15000;
-	qp_init_attr.cap.max_send_sge=1;
+	qp_init_attr.cap.max_send_sge=2;
 
 	qp_init_attr.cap.max_recv_wr=15000;
 	qp_init_attr.cap.max_recv_sge=1;
@@ -981,13 +1020,13 @@ static void dhmp_destroy_source(struct dhmp_transport* rdma_trans)
 	if(rdma_trans->send_mr.addr)
 	{
 		ibv_dereg_mr(rdma_trans->send_mr.mr);
-		free(rdma_trans->send_mr.addr);
+		nvm_free(rdma_trans->send_mr.addr,rdma_trans->send_recv_size);
 	}
 
 	if(rdma_trans->recv_mr.addr)
 	{
 		ibv_dereg_mr(rdma_trans->recv_mr.mr);
-		free(rdma_trans->recv_mr.addr);
+		nvm_free(rdma_trans->recv_mr.addr ,rdma_trans->send_recv_size);
 	}
 	
 	rdma_destroy_qp(rdma_trans->cm_id);
@@ -998,6 +1037,12 @@ static void dhmp_destroy_source(struct dhmp_transport* rdma_trans)
 		dhmp_context_del_event_fd(rdma_trans->ctx, rdma_trans->dcq->comp_channel->fd);
 
 	dhmp_context_del_event_fd(rdma_trans->ctx, rdma_trans->event_channel->fd);
+#ifdef RFP
+	server->RFP[rdma_trans->node_id].time = 0;
+#endif
+#ifdef scalable
+	server->Salable[rdma_trans->node_id].Slocal_mr = NULL;
+#endif
 	
 }
 
@@ -1156,7 +1201,7 @@ static int dhmp_memory_register(struct ibv_pd *pd,
 	return 0;
 
 out:
-	nvm_free(dmr->addr);
+	nvm_free(dmr->addr,length);
 	return -1;
 }
 
@@ -1201,14 +1246,14 @@ struct dhmp_transport* dhmp_transport_create(struct dhmp_context* ctx,
 								RECV_REGION_SIZE);
 		if(err)
 			goto out_send_mr;
-		
+		rdma_trans->send_recv_size = SEND_REGION_SIZE;
 		rdma_trans->is_poll_qp=is_poll_qp;
 	}
 	
 	return rdma_trans;
 out_send_mr:
 	ibv_dereg_mr(rdma_trans->send_mr.mr);
-	free(rdma_trans->send_mr.addr);
+	nvm_free(rdma_trans->send_mr.addr , SEND_REGION_SIZE);
 	
 out_event_channel:
 	dhmp_context_del_event_fd(rdma_trans->ctx, rdma_trans->event_channel->fd);
@@ -1523,7 +1568,7 @@ void amper_ud_post_send(struct dhmp_transport* rdma_trans, struct dhmp_msg* msg_
 
 }
 
-void dhmp_post_send(struct dhmp_transport* rdma_trans, struct dhmp_msg* msg_ptr)
+struct dhmp_task * dhmp_post_send(struct dhmp_transport* rdma_trans, struct dhmp_msg* msg_ptr)
 {
 	struct ibv_send_wr send_wr,*bad_wr=NULL;
 	struct ibv_sge sge;
@@ -1553,6 +1598,7 @@ void dhmp_post_send(struct dhmp_transport* rdma_trans, struct dhmp_msg* msg_ptr)
 	err=ibv_post_send ( rdma_trans->qp, &send_wr, &bad_wr );
 	if ( err )
 		ERROR_LOG ( "ibv_post_send error." );
+	return send_task_ptr;
 
 }
 
@@ -2179,9 +2225,9 @@ void amper_tailwindRPC_request_handler(struct dhmp_transport* rdma_trans, struct
 	memcpy ( &response.req_info, msg->data, sizeof(struct dhmp_TailwindRPC_request));
 
 	void * context_ptr = msg->data + sizeof(struct dhmp_TailwindRPC_request);
-	size_t length = response.req_info.req_size;
+	size_t length = *(size_t *)context_ptr;
 	void * server_addr = response.req_info.dhmp_addr;
-	memcpy(server_addr, context_ptr, length);
+	memcpy(server_addr, context_ptr + sizeof(size_t) + sizeof(uint32_t) + sizeof(uint32_t), length);
 	_mm_clflush(server_addr);
 
 	res_msg.msg_type=DHMP_MSG_Tailwind_RPC_response;
@@ -2201,27 +2247,27 @@ void amper_tailwindRPC_response_handler(struct dhmp_transport* rdma_trans, struc
 
 void amper_DaRPC_request_handler(struct dhmp_transport* rdma_trans, struct dhmp_msg* msg)
 {
-	struct dhmp_DaRPC_response *response ,*cur_addr;
+	void *response ,*cur_addr;
 	size_t reply_size = sizeof(struct dhmp_DaRPC_response);
 	
 	char * context_ptr = msg->data + sizeof(struct dhmp_DaRPC_request);
-	char write_flag = context_ptr[0];
-	char batch = context_ptr[1];
+	char batch = context_ptr[0];
+	char write_flag = context_ptr[1];
 	context_ptr += 2;
-	size_t size;
+	size_t size =*(size_t*)(context_ptr + sizeof(uintptr_t));
 	void * server_addr;
 	int i=0;
 	if(write_flag == 0)
 		reply_size = reply_size + (batch*size);
 	response = malloc(reply_size);
-	memcpy ( &response->req_info, msg->data, sizeof(struct dhmp_DaRPC_request));
-	response->batch = batch;
-	response->write_flag = write_flag;
+	memcpy ( &((struct dhmp_DaRPC_response *)response)->req_info, msg->data, sizeof(struct dhmp_DaRPC_request));
+	((struct dhmp_DaRPC_response *)response)->batch = batch;
+	((struct dhmp_DaRPC_response *)response)->write_flag = write_flag;
 	cur_addr = response + sizeof(struct dhmp_DaRPC_response);
 	for(;i < batch;i++)
 	{
-		size = *(size_t*)(context_ptr + sizeof(uintptr_t));
 		server_addr= (void *)*(uintptr_t*)context_ptr;
+		size = *(size_t*)(context_ptr + sizeof(uintptr_t));
 		context_ptr = context_ptr + sizeof(uintptr_t) + sizeof(size_t);
 		if(write_flag == 1)
 		{
@@ -2239,7 +2285,9 @@ void amper_DaRPC_request_handler(struct dhmp_transport* rdma_trans, struct dhmp_
 	res_msg.msg_type=DHMP_MSG_DaRPC_response;
 	res_msg.data_size= reply_size;
 	res_msg.data= response;
-	dhmp_post_send(rdma_trans, &res_msg); 
+	struct dhmp_task * task = dhmp_post_send(rdma_trans, &res_msg); 
+	while(!task->done_flag);
+	free(response);
 	return ;
 }
 
@@ -2250,13 +2298,14 @@ void amper_DaRPC_response_handler(struct dhmp_transport* rdma_trans, struct dhmp
 	if(response_msg->write_flag == 0)
 	{
 		void* temp;
-		// int i;
-		// for(i = 0;i<response_msg->batch;i++)
-		// {
-			temp = response_msg + sizeof(struct dhmp_DaRPC_response);
-			memcpy(response_msg->req_info.local_addr, temp , response_msg->req_info.req_size);
+		int i;
+		temp = response_msg + sizeof(struct dhmp_DaRPC_response);
+		for(i = 0;i<response_msg->batch;i++)
+		{
+			
+			memcpy((void*)(response_msg->req_info.local_addr)[i], temp , response_msg->req_info.req_size);
 			temp += response_msg->req_info.req_size;
-		// }
+		}
 	}
 	task->recv_flag = true;
 
@@ -2267,23 +2316,44 @@ void amper_DaRPC_response_handler(struct dhmp_transport* rdma_trans, struct dhmp
 
 void amper_UD_request_handler(struct dhmp_transport* rdma_trans, struct dhmp_msg* msg)
 {
-	struct dhmp_UD_response response;
+	void *response ,*cur_addr;
+	size_t reply_size = sizeof(struct dhmp_UD_response);
+	
+	char * context_ptr = msg->data + sizeof(struct dhmp_UD_request);
+	char batch = context_ptr[0];
+	char write_flag = context_ptr[1];
+	context_ptr += 2;
+	size_t size = *(size_t*)(context_ptr + sizeof(uintptr_t));
+	void * server_addr;
+	int i=0;
+	if(write_flag == 0)
+		reply_size = reply_size + (batch*size);
+	response = malloc(reply_size);
+	memcpy ( &((struct dhmp_UD_response *)response)->req_info, msg->data, sizeof(struct dhmp_UD_request));
+	((struct dhmp_UD_response *)response)->batch = batch;
+	((struct dhmp_UD_response *)response)->write_flag = write_flag;
+	cur_addr = response + sizeof(struct dhmp_UD_response);
+	for(;i < batch;i++)
+	{
+		server_addr= (void *)*(uintptr_t*)context_ptr;
+		size = *(size_t*)(context_ptr + sizeof(uintptr_t));
+		context_ptr = context_ptr + sizeof(uintptr_t) + sizeof(size_t);
+		if(write_flag == 1)
+		{
+			memcpy(server_addr, context_ptr, size);
+			_mm_clflush(server_addr);
+			context_ptr += size;
+		}
+		else
+		{
+			memcpy(cur_addr, server_addr ,size);
+			cur_addr += size;
+		}
+	}
 	struct dhmp_msg res_msg;
-
-	memcpy ( &response.req_info, msg->data, sizeof(struct dhmp_UD_request));
-
-	void * context_ptr = msg->data + sizeof(struct dhmp_UD_request);
-	size_t length = response.req_info.req_size;
-	// void * server_addr = nvm_malloc(single_length);
-	// int i;
-	// for(;i < BATCH;i++)
-	// {
-		// memcpy(server_addr, context_ptr, length);
-	// 	_mm_clflush(server_addr);
-	// }
 	res_msg.msg_type=DHMP_MSG_UD_RESPONSE;
-	res_msg.data_size=sizeof(struct dhmp_UD_response);
-	res_msg.data=&response;
+	res_msg.data_size= reply_size;
+	res_msg.data= response;
 	amper_ud_post_send(rdma_trans, &res_msg); 
 	return ;
 }
@@ -2292,6 +2362,16 @@ void amper_UD_response_handler(struct dhmp_transport* rdma_trans, struct dhmp_ms
 {
 	struct dhmp_UD_response* response_msg = msg->data;
 	struct dhmp_UD_work * task = response_msg->req_info.task;
+	if(response_msg->write_flag == 0)
+	{
+		void* temp = response_msg + sizeof(struct dhmp_UD_response);
+		int i;
+		for(i = 0;i<response_msg->batch;i++)
+		{
+			memcpy((void*)((response_msg->req_info.local_addr)[i]), temp , response_msg->req_info.req_size);
+			temp += response_msg->req_info.req_size;
+		}
+	}
 	task->recv_flag = true;
 	INFO_LOG("UD flush ");
 }

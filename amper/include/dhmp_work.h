@@ -15,7 +15,7 @@ struct amper_clover_work{
 	void *dhmp_addr;
 	size_t length;
 	bool done_flag;
-	uintptr_t value;
+	uint64_t value;
 };
 
 struct amper_L5_work{
@@ -24,7 +24,8 @@ struct amper_L5_work{
 	size_t length;
 	bool done_flag;
 	char flag_write;
-	uintptr_t dhmp_addr;
+	void* dhmp_addr;
+	int cur;
 };
 
 struct amper_Tailwind_work{
@@ -34,11 +35,13 @@ struct amper_Tailwind_work{
 	size_t offset;
 	bool done_flag;
 	bool recv_flag;
+	size_t head_size;
+	struct ibv_mr*head_mr;
 };
 
 struct amper_DaRPC_work{
 	struct dhmp_transport *rdma_trans;
-	void *local_addr;
+	uintptr_t * local_addr;
 	size_t length;
 	bool done_flag;
 	bool recv_flag;
@@ -53,6 +56,8 @@ struct amper_scalable_work{
 	size_t length;
 	int write_type;
 	bool done_flag;
+	struct ibv_mr* rmr;
+	uintptr_t * local_addr;
 };
 
 struct dhmp_RFP_work{
@@ -187,7 +192,8 @@ enum dhmp_work_type{
 	AMPER_WORK_Tailwind_RPC,
 	AMPER_WORK_DaRPC,
 	AMPER_WORK_RFP,
-	AMPER_WORK_UD
+	AMPER_WORK_UD,
+	AMPER_WORK_FaRM
 };
 
 
@@ -200,7 +206,7 @@ struct dhmp_work{
 struct dhmp_UD_work{
 	struct dhmp_transport *rdma_trans;
 	size_t length;
-	void * local_buf;
+	uintptr_t * local_addr;
 	bool recv_flag;
 	bool done_flag;
 };
@@ -208,6 +214,7 @@ struct dhmp_UD_work{
 void *dhmp_work_handle_thread(void *data);
 int dhmp_hash_in_client(void *addr);
 struct dhmp_addr_info *dhmp_get_addr_info_from_ht(int index, void *dhmp_addr);
+void *FaRM_run_client();
 
 
 int amper_post_write(struct dhmp_task* task, struct ibv_mr* rmr, uint64_t* sge_addr, uint32_t sge_length,uint32_t sge_lkey ,bool is_inline);
