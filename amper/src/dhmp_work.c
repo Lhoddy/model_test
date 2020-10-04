@@ -729,6 +729,10 @@ void *FaRM_run_client() // 本地core dump的原因
 		client->FaRM.Ccur = (client->FaRM.Ccur + 1) % FaRM_buffer_NUM;
 		reply = client->FaRM.C_mr->addr + client->FaRM.size + client->FaRM.Ccur * buffer_size;
 		valid = reply + (sizeof(uintptr_t)*2 + sizeof(size_t) + 1);
+		if(client->FaRM.size == 0)
+		{
+			break;
+		}
 	}
 	return;
 }

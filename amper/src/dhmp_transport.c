@@ -547,7 +547,7 @@ static void dhmp_wc_success_handler(struct ibv_wc* wc)
 	task_ptr=(struct dhmp_task*)(uintptr_t)wc->wr_id;
 	void * message_cxt = task_ptr->sge.addr;
 #ifdef UD
-	:qp += 40;
+	message_cxt += 40;
 #endif
 	rdma_trans=task_ptr->rdma_trans;
 	if(wc->opcode == IBV_WC_RECV)
@@ -857,6 +857,7 @@ static int on_cm_addr_resolved(struct rdma_cm_event* event, struct dhmp_transpor
 
 static int on_cm_route_resolved(struct rdma_cm_event* event, struct dhmp_transport* rdma_trans)
 {
+	INFO_LOG(" on_cm_route_resolved event->id = %p %d listen=%p %d",event->id,event->id->qp_type,rdma_trans->cm_id, rdma_trans->cm_id->qp_type);
 	struct rdma_conn_param conn_param;
 	int i, retval=0;
 #ifdef UD
@@ -925,6 +926,7 @@ static struct dhmp_transport* dhmp_is_exist_connection(struct sockaddr_in *sock)
 static int on_cm_connect_request(struct rdma_cm_event* event, 
 										struct dhmp_transport* rdma_trans)   //only for ud client  not ud server
 {
+	INFO_LOG(" on_cm_connect_request event->id = %p %d listen=%p %d",event->id,event->id->qp_type,rdma_trans->cm_id, rdma_trans->cm_id->qp_type);
 	struct dhmp_transport* new_trans,*normal_trans;
 	struct rdma_conn_param conn_param;
 	int i,retval=0;
@@ -1053,10 +1055,16 @@ static void dhmp_destroy_source(struct dhmp_transport* rdma_trans)
 
 	dhmp_context_del_event_fd(rdma_trans->ctx, rdma_trans->event_channel->fd);
 #ifdef RFP
-	server->RFP[rdma_trans->node_id].time = 0;
+	if(server!= NULL)
+		server->RFP[rdma_trans->node_id].time = 0;
 #endif
 #ifdef scaleRPC
-	server->scaleRPC[rdma_trans->node_id].Slocal_mr = NULL;
+	if(server!= NULL)
+		server->scaleRPC[rdma_trans->node_id].Slocal_mr = NULL;
+#endif
+#ifdef FaRM
+	if(client!= NULL)client->FaRM.size = 0;
+	if(server!= NULL)server->FaRM[rdma_trans->node_id].size = 0;
 #endif
 	
 }

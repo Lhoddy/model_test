@@ -437,6 +437,10 @@ void *FaRM_run(void* arg1)
 		i = (i + 1) % FaRM_buffer_NUM;
 		reply = server->FaRM[node_id].S_mr->addr + size + (i * buffer_size);
 		valid = reply + (sizeof(uintptr_t)*2 + sizeof(size_t) + 1);
+		if(server->FaRM[node_id].size == 0)
+		{
+			break;
+		}
 	}
 
 	return;
