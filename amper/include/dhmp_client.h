@@ -82,11 +82,11 @@ struct dhmp_client{
 
 	struct{
 		struct ibv_mr Sreq_mr;
-		struct ibv_mr Sdata_mr;
 		struct ibv_mr* Creq_mr;
 		struct ibv_mr* Cdata_mr;
 		char context_swith;
-	}Salable;
+
+	}scaleRPC;
 
 
 	struct{

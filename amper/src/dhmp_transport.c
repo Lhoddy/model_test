@@ -225,19 +225,22 @@ static void dhmp_malloc_request_handler(struct dhmp_transport* rdma_trans,
 		memcpy(&(response.mr), server->RFP[rdma_trans->node_id].write_mr, sizeof(struct ibv_mr));
 		memcpy(&(response.mr2), server->RFP[rdma_trans->node_id].read_mr, sizeof(struct ibv_mr));
 	}
-	else if(response.req_info.is_special == 7)// for scalable
+	else if(response.req_info.is_special == 7)// for scaleRPC
 	{
 		amper_allocspace_for_server(rdma_trans, 7, response.req_info.req_size); 
-		memcpy(&(server->Salable[rdma_trans->node_id].Creq_mr), &(response.req_info.mr) , sizeof(struct ibv_mr));
-		memcpy(&(server->Salable[rdma_trans->node_id].Cdata_mr), &(response.req_info.mr2) , sizeof(struct ibv_mr));
-		memcpy(&(response.mr), server->Salable[rdma_trans->node_id].Sreq_mr, sizeof(struct ibv_mr));
-		memcpy(&(response.mr2), server->Salable[rdma_trans->node_id].Sdata_mr, sizeof(struct ibv_mr));
+		memcpy(&(server->scaleRPC[rdma_trans->node_id].Cdata_mr), &(response.req_info.mr) , sizeof(struct ibv_mr));
+		memcpy(&(response.mr), server->scaleRPC[rdma_trans->node_id].Sreq_mr, sizeof(struct ibv_mr));
 	}
 	else if(response.req_info.is_special == 8)// for FaRM
 	{
 		amper_allocspace_for_server(rdma_trans, 8, response.req_info.req_size); 
 		memcpy(&(server->FaRM[rdma_trans->node_id].C_mr), &(response.req_info.mr) , sizeof(struct ibv_mr));
 		memcpy(&(response.mr), server->FaRM[rdma_trans->node_id].S_mr, sizeof(struct ibv_mr));
+	}
+	else if(response.req_info.is_special == 9)// for herd
+	{
+		amper_allocspace_for_server(rdma_trans, 9, response.req_info.req_size); 
+		memcpy(&(response.mr), server->herd[rdma_trans->node_id].S_mr, sizeof(struct ibv_mr));
 	}
 	else
 	{
@@ -318,9 +321,8 @@ static void dhmp_malloc_response_handler(struct dhmp_transport* rdma_trans,
 	}
 	else if(response_msg.req_info.is_special == 7)
 	{
-		memcpy(&(client->Salable.Sreq_mr), &response_msg.mr, sizeof(struct ibv_mr));
-		memcpy(&(client->Salable.Sdata_mr), &response_msg.mr2, sizeof(struct ibv_mr)); 
-		client->Salable.context_swith = 0;
+		memcpy(&(client->scaleRPC.Sreq_mr), &response_msg.mr, sizeof(struct ibv_mr));
+		client->scaleRPC.context_swith = 0;
 	}
 	else if(response_msg.req_info.is_special == 8)// for FaRM
 	{
@@ -332,6 +334,16 @@ static void dhmp_malloc_response_handler(struct dhmp_transport* rdma_trans,
 		for(i = 0;i < FaRM_buffer_NUM;i++)
 			client->FaRM.is_available[i] = 1;
 		pthread_create(&(client->FaRM.poll_thread), NULL, FaRM_run_client, NULL);
+	}
+	else if(response_msg.req_info.is_special == 9)// for herd
+	{
+		memcpy(&(client->herd.S_mr), &response_msg.mr, sizeof(struct ibv_mr));
+		client->herd.size = response_msg.req_info.req_size;
+		client->herd.Scur = 0;
+		client->herd.Ccur = 0;
+		int i;
+		for(i = 0;i < FaRM_buffer_NUM;i++)
+			client->herd.is_available[i] = 1;
 	}
 	else{
 		addr_info=response_msg.req_info.addr_info;
@@ -513,6 +525,10 @@ static void dhmp_wc_recv_handler(struct dhmp_transport* rdma_trans,
 		case DHMP_MSG_UD_RESPONSE:
 			amper_UD_response_handler(rdma_trans,msg);
 			break;	
+		case DHMP_MSG_herd_RESPONSE:
+			amper_herd_response_handler(rdma_trans,msg);
+			break;
+			
 		// case 96:
 		// 	amper_UD_request_handler(rdma_trans,msg);
 		default:
@@ -566,8 +582,7 @@ static void dhmp_wc_success_handler(struct ibv_wc* wc)
 			dhmp_post_recv(rdma_trans, task_ptr->sge.addr);
 			break;
 		case IBV_WC_RDMA_WRITE:
-#ifdef FaRM
-#else
+#ifdef Spwrite
 			if(task_ptr->addr_info != NULL)
 				task_ptr->addr_info->write_flag=false;
 #endif
@@ -1040,8 +1055,8 @@ static void dhmp_destroy_source(struct dhmp_transport* rdma_trans)
 #ifdef RFP
 	server->RFP[rdma_trans->node_id].time = 0;
 #endif
-#ifdef scalable
-	server->Salable[rdma_trans->node_id].Slocal_mr = NULL;
+#ifdef scaleRPC
+	server->scaleRPC[rdma_trans->node_id].Slocal_mr = NULL;
 #endif
 	
 }
@@ -2374,4 +2389,25 @@ void amper_UD_response_handler(struct dhmp_transport* rdma_trans, struct dhmp_ms
 	}
 	task->recv_flag = true;
 	INFO_LOG("UD flush ");
+}
+
+void amper_herd_response_handler(struct dhmp_transport* rdma_trans, struct dhmp_msg* msg)
+{
+	void* response = msg->data;
+	char write_flag = *(char*)response;
+	char cur = *(char*)(response+1);
+	
+	if(write_flag == 0)
+	{
+		void* local_addr = *(char*)(response + 2 + sizeof(uintptr_t));
+		size_t size = *(char*)(response + 2 + sizeof(uintptr_t)*2);
+		response += (response + 2 + sizeof(uintptr_t)*2 + sizeof(size_t));
+		memcpy(local_addr, response , size);
+	}
+
+	pthread_mutex_lock(&client->mutex_request_num);
+	client->herd.is_available[cur] = 1;
+	pthread_mutex_unlock(&client->mutex_request_num);
+
+	INFO_LOG("herd flush ");
 }

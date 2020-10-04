@@ -335,6 +335,62 @@ void model_FaRM( void * local_buf, size_t count, void * globle_addr, char flag_w
 	wwork.dhmp_addr = globle_addr;
 	wwork.flag_write = flag_write;
 			
+	work->work_type=AMPER_WORK_Herd;
+	work->work_data=&wwork;
+	
+	while(1)
+	{
+		pthread_mutex_lock(&client->mutex_request_num);
+		if(client->herd.is_available[client->herd.Scur] == 0)
+		{
+			pthread_mutex_unlock(&client->mutex_request_num);
+			continue;
+		}
+		client->herd.is_available[client->herd.Scur] = 0;
+		wwork.cur = client->herd.Scur;
+		client->herd.Scur= (client->herd.Scur + 1) % FaRM_buffer_NUM;
+		pthread_mutex_unlock(&client->mutex_request_num);
+		break;
+	}
+
+	pthread_mutex_lock(&client->mutex_work_list);
+	list_add_tail(&work->work_entry, &client->work_list);
+	pthread_mutex_unlock(&client->mutex_work_list);
+	
+	while(!wwork.done_flag);
+
+	free(work);
+	
+	return ;
+}
+
+
+
+void model_herd( void * local_buf, size_t count, void * globle_addr, char flag_write)
+{
+	struct dhmp_transport *rdma_trans= client->connect_trans; // assume only one server
+	struct amper_L5_work wwork; //L5 = Farm work = herd
+	struct dhmp_work *work;
+
+	if(!rdma_trans||rdma_trans->trans_state!=DHMP_TRANSPORT_STATE_CONNECTED)
+	{
+		ERROR_LOG("rdma connection error.");
+		return ;
+	}
+
+	work=malloc(sizeof(struct dhmp_work));
+	if(!work)
+	{
+		ERROR_LOG("alloc memory error.");
+		return ;
+	}
+	wwork.done_flag=false;
+	wwork.length=count;
+	wwork.local_addr=local_buf;
+	wwork.rdma_trans=rdma_trans;
+	wwork.dhmp_addr = globle_addr;
+	wwork.flag_write = flag_write;
+			
 	work->work_type=AMPER_WORK_FaRM;
 	work->work_data=&wwork;
 	
@@ -364,7 +420,7 @@ void model_FaRM( void * local_buf, size_t count, void * globle_addr, char flag_w
 	return ;
 }
 
-int amper_scalable(struct ibv_mr* rmr, size_t count, int write_type, uintptr_t * local_addr)
+int amper_scalable(size_t offset, size_t count, int write_type, size_t length, char flag_write, char batch)
 {
 	struct dhmp_transport *rdma_trans= client->connect_trans; // assume only one server
 	struct amper_scalable_work wwork;
@@ -384,10 +440,12 @@ int amper_scalable(struct ibv_mr* rmr, size_t count, int write_type, uintptr_t *
 	}
 	wwork.done_flag=false;
 	wwork.length=count;
-	wwork.rmr = rmr;
+	wwork.size = length;
 	wwork.write_type = write_type;
 	wwork.rdma_trans=rdma_trans;
-	wwork.local_addr = local_addr;
+	wwork.flag_write = flag_write;
+	wwork.batch = batch;
+	wwork.offset = offset;
 			
 	work->work_type=AMPER_WORK_scalable;
 	work->work_data=&wwork;
@@ -1007,9 +1065,9 @@ void dhmp_client_init(size_t size,int obj_num)
 	pthread_create(&client->work_thread, NULL, dhmp_work_handle_thread, (void*)client);
 
 	// dhmp_malloc(0,1);// ringbuffer
-	{//scalable
-		client->Salable.Creq_mr = client->per_ops_mr->mr;
-		client->Salable.Cdata_mr = client->per_ops_mr2->mr;
+	{//scaleRPC
+		client->scaleRPC.Creq_mr = client->per_ops_mr->mr;
+		client->scaleRPC.Cdata_mr = client->per_ops_mr2->mr;
 	}
 	{//L5
 		client->local_mr = client->per_ops_mr->mr;
@@ -1209,68 +1267,85 @@ void model_3_DaRPC( uintptr_t * globle_addr , size_t length, uintptr_t * local_a
 void model_7_scalable( uintptr_t * globle_addr , size_t length, uintptr_t * local_addr, char flag_write, char batch)
 {
 	int i = 0;
-	if(client->Salable.context_swith == Sca1e_Swith_Time)
+	size_t local_length;
+	size_t offset ;
+	if(client->scaleRPC.context_swith == Sca1e_Swith_Time)
 	{
 		//local_data
-		size_t local_length1;
 		if(flag_write == 1)
-			local_length1 = batch * (length + sizeof(void*) + sizeof(size_t) );//(data+remote_addr+size)* batch
+			local_length = batch * (length + sizeof(void*)*2 + sizeof(size_t) );//(data+remote_addr+size)* batch
 		else
-			local_length1 = batch * (sizeof(void*) + sizeof(size_t) );//(data+remote_addr+size)* batch
-		void * local_data1 = malloc(local_length1);
-		struct dhmp_send_mr * local_data_smr = dhmp_create_smr_per_ops(client->connect_trans, local_data1, local_length1);
-		for(i = 0; i < batch ;i++)
-		{
-			memcpy(local_data1 , &(globle_addr[i]), sizeof(uintptr_t));
-			memcpy(local_data1 + sizeof(uintptr_t) , &length , sizeof(size_t));
-			local_data1  = local_data1 + sizeof(uintptr_t) + sizeof(size_t);
-			if(flag_write == 1)
-			{
-				memcpy(local_data1 , (void*)(local_addr[i]), length);
-				local_data1 += length;
-			}
-		}
-		//write req-data
-		char * scalable_write1 = client->per_ops_mr_addr;
-		scalable_write1[0] = batch;
-		scalable_write1[1] = flag_write+10;
-		size_t scalable_write1_length = 2 + sizeof(size_t) + sizeof(struct ibv_mr);
-		memcpy(scalable_write1 + 2 , &length , sizeof(size_t));
-		memcpy(scalable_write1 + 2 + sizeof(size_t), local_data_smr->mr , sizeof(struct ibv_mr));
-		//post
-		client->Salable.context_swith = 0;
-		amper_scalable(client->per_ops_mr->mr , scalable_write1_length, 1 , local_addr);
-		ibv_dereg_mr(local_data_smr->mr);
-		free(local_data_smr);
-	}
-	else
-	{
-		size_t local_length;
-		if(flag_write == 1)
-			local_length = batch * (length + sizeof(void*) + sizeof(size_t) );//(data+remote_addr+size)* batch
-		else
-			local_length = batch * (sizeof(void*) + sizeof(size_t) );//(data+remote_addr+size)* batch
+			local_length = batch * (sizeof(void*)*2 + sizeof(size_t) );//(data+remote_addr+size)* batch
 		void * local_data = malloc(local_length);
 		struct dhmp_send_mr * local_data_smr = dhmp_create_smr_per_ops(client->connect_trans, local_data, local_length);
-		*(char *)local_data = batch;
-		*(char *)(local_data+1) = flag_write+20;
-		local_data += 2;
 		for(i = 0; i < batch ;i++)
 		{
 			memcpy(local_data , &(globle_addr[i]), sizeof(uintptr_t));
-			memcpy(local_data + sizeof(uintptr_t) , &length , sizeof(size_t));
-			local_data  = local_data + sizeof(uintptr_t) + sizeof(size_t);
+			memcpy(local_data + sizeof(uintptr_t) , &(local_addr[i]) , sizeof(uintptr_t));
+			memcpy(local_data + sizeof(uintptr_t)*2 , &length , sizeof(size_t));
+			local_data  = local_data + sizeof(uintptr_t)*2 + sizeof(size_t);
 			if(flag_write == 1)
 			{
 				memcpy(local_data , (void*)(local_addr[i]), length);
 				local_data += length;
 			}
 		}
-		amper_scalable(local_data_smr->mr , local_length, 2 , local_addr);
+		//write req-data
+		size_t scalable_write_length = 4 + sizeof(size_t) + sizeof(struct ibv_mr);
+		offset = batch * (length + sizeof(void*)*2 + sizeof(size_t)) - sizeof(size_t) - sizeof(struct ibv_mr);
+		char * scalable_write = client->scaleRPC.Creq_mr->addr + offset;
+		memcpy(scalable_write  , &local_length , sizeof(size_t));
+		memcpy(scalable_write + sizeof(size_t), local_data_smr->mr , sizeof(struct ibv_mr));
+		scalable_write += (sizeof(size_t) + sizeof(struct ibv_mr));
+		scalable_write[0] = 1;
+		scalable_write[1] = batch;
+		scalable_write[2] = flag_write;
+		scalable_write[3] = 1; // valid
+		//post
+		client->scaleRPC.context_swith = 0;
+		INFO_LOG("amper_scale2 size=%d totol=%d offset = %d,dhm=%p local=%p,Creq_mr=%p  Cdata=%p",length,local_length,offset,globle_addr[0] ,
+			local_addr[0],client->scaleRPC.Creq_mr->addr,client->scaleRPC.Cdata_mr->addr);
+		amper_scalable(offset , scalable_write_length , 1 , length, flag_write, batch);
 		ibv_dereg_mr(local_data_smr->mr);
 		free(local_data_smr);
 	}
-	client->Salable.context_swith ++;
+	else
+	{
+		if(flag_write == 1)
+			local_length = 4+ batch * (length + sizeof(void*)*2 + sizeof(size_t) );//(data+remote_addr+size)* batch
+		else
+			local_length = 4+ batch * (sizeof(void*)*2 + sizeof(size_t) );//(data+remote_addr+size)* batch
+		char *scalable_write = client->scaleRPC.Creq_mr->addr;
+		offset = 0;
+		if(flag_write == 0)
+		{
+			scalable_write += (batch * length);
+			offset = (batch * length);
+		}
+		
+		for(i = 0; i < batch ;i++)
+		{
+			memcpy(scalable_write , &(globle_addr[i]), sizeof(uintptr_t));
+			memcpy(scalable_write + sizeof(uintptr_t) , &(local_addr[i]) , sizeof(uintptr_t));
+			memcpy(scalable_write + sizeof(uintptr_t)*2 , &length , sizeof(size_t));
+			scalable_write  = scalable_write + sizeof(uintptr_t)*2 + sizeof(size_t);
+			if(flag_write == 1)
+			{
+				memcpy(scalable_write , (void*)(local_addr[i]), length);
+				scalable_write += length;
+			}
+		}
+		scalable_write[0] = 2;
+		scalable_write[1] = batch;
+		scalable_write[2] = flag_write;
+		scalable_write[3] = 1; // valid
+		INFO_LOG("amper_scale2 size=%d totol=%d offset = %d,dhm=%p local=%p,Creq_mr=%p  Cdata=%p",length,local_length,offset,globle_addr[0] ,
+			local_addr[0],client->scaleRPC.Creq_mr->addr,client->scaleRPC.Cdata_mr->addr);
+		amper_scalable(offset, local_length , 2 , length, flag_write, batch);
+		// ibv_dereg_mr(local_data_smr->mr);
+		// free(local_data_smr);
+	}
+	client->scaleRPC.context_swith ++;
 }
 
 

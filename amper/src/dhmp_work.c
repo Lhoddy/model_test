@@ -140,8 +140,7 @@ void dhmp_malloc_work_handler(struct dhmp_work *work)
 	}
 	if(malloc_work->is_special == 7)  // for scalale
 	{
-		memcpy(&(req_msg.mr) , client->Salable.Creq_mr, sizeof(struct ibv_mr)); 
-		memcpy(&(req_msg.mr2) , client->Salable.Cdata_mr, sizeof(struct ibv_mr)); 
+		memcpy(&(req_msg.mr) , client->scaleRPC.Cdata_mr, sizeof(struct ibv_mr)); 
 	}
 	if(malloc_work->is_special == 8)  // for FaRN
 	{
@@ -389,46 +388,59 @@ int amper_scalable_work_handler(struct dhmp_work *work)
 	struct dhmp_task* scalable_task2;
 	// client->per_ops_mr = Sreq_mr ;client->per_ops_mr2 = Sdata_mr  
 
-	scalable_task = dhmp_write_task_create(wwork->rdma_trans, client->per_ops_mr, wwork->length);
+	scalable_task = dhmp_write_task_create(wwork->rdma_trans, NULL, 0);
 	if(!scalable_task)
 	{
 		ERROR_LOG("allocate memory error.");
 		return -1;
 	}
-	amper_post_write(scalable_task, &client->Salable.Sreq_mr, scalable_task->sge.addr, scalable_task->sge.length, scalable_task->sge.lkey, false);
-
-#ifdef FLUSH1
-	scalable_task2 = dhmp_read_task_create(wwork->rdma_trans, NULL, 0);
-	if(!scalable_task2)
 	{
-		ERROR_LOG("allocate memory error.");
-		return -1;
+		struct ibv_send_wr send_wr,*bad_wr=NULL;
+		struct ibv_sge sge;
+		struct dhmp_send_mr* temp_mr=NULL;
+		memset(&send_wr, 0, sizeof(struct ibv_send_wr));
+		send_wr.wr_id= ( uintptr_t ) scalable_task;
+		send_wr.opcode=IBV_WR_RDMA_WRITE;
+		send_wr.sg_list=&sge;
+		send_wr.num_sge=1;
+			send_wr.send_flags=IBV_SEND_SIGNALED;
+		send_wr.wr.rdma.remote_addr= ( uintptr_t )client->scaleRPC.Sreq_mr.addr + wwork->offset;
+		send_wr.wr.rdma.rkey= client->scaleRPC.Sreq_mr.rkey;
+		sge.addr= ( uintptr_t ) client->scaleRPC.Creq_mr->addr + wwork->offset;
+		sge.length= wwork->length;
+		sge.lkey= client->scaleRPC.Creq_mr->lkey;
+		int err=ibv_post_send ( scalable_task->rdma_trans->qp, &send_wr, &bad_wr );
+		if ( err )
+		{
+			ERROR_LOG("ibv_post_send error");
+			exit(-1);
+			return -1;
+		}	
 	}
-	amper_post_read(scalable_task2, &client->Salable.Sreq_mr, NULL, 0, 0, false);
-	while(!scalable_task2->done_flag);
-#endif
-
 	while(!scalable_task->done_flag);
-	void * temp = client->Salable.Cdata_mr->addr;
-	while(*(char*)temp == 0);
-	char batch = *(char *)temp;
-	char write_flag = *(char*)(temp+1);
-	if(write_flag == 0)
+	free(scalable_task);
+	INFO_LOG("********scale wite over Sreq=%p Cdata_mr= %p offset=%d",client->scaleRPC.Sreq_mr.addr,client->scaleRPC.Cdata_mr->addr,wwork->offset);
+
+	void * temp;
+	size_t head_size = wwork->batch * (sizeof(uintptr_t)*2 + sizeof(size_t) );
+
+	char *valid = client->scaleRPC.Cdata_mr->addr + head_size + wwork->batch * wwork->size;
+	while(*valid== 0);
+	if(wwork->flag_write == 0)
 	{
-		temp += 2;
+		temp = client->scaleRPC.Cdata_mr->addr;
 		size_t size;
 		void *client_addr;
-		for(i =0 ;i<batch;i++)
+		for(i =0 ;i<wwork->batch;i++)
 		{
-			client_addr = (void *)((wwork->local_addr)[i]);
-			size = *(size_t*)(temp + sizeof(uintptr_t));
-			temp = temp + sizeof(uintptr_t) + sizeof(size_t);
+			client_addr = (void *)*(uintptr_t*)(temp + sizeof(uintptr_t));
+			size = *(size_t*)(temp + sizeof(uintptr_t)*2);
+			temp = temp + sizeof(uintptr_t)*2 + sizeof(size_t);
 			memcpy(client_addr, temp , size);
 			temp += size;
 		}
 	}
-	*(char*)(client->Salable.Cdata_mr->addr) = 0;
-
+	*valid = 0;
 out:
 	wwork->done_flag=true;
 }
@@ -553,8 +565,75 @@ int amper_L5_work_handler(struct dhmp_work *work)   /// same as two write
 	wwork->done_flag=true;
 }
 
+int amper_herd_work_handler(struct dhmp_work *work)   
+{
+	struct amper_L5_work *wwork;
+	wwork=(struct amper_L5_work *)work->work_data;
+	struct dhmp_send_mr* local_smr = NULL ;
+	
+	size_t head_size = sizeof(uintptr_t)*2 + sizeof(size_t)+2;
+	size_t buffer_size = head_size + wwork->length;
+	void *temp_head ,*temp_all;
 
-int amper_FaRM_work_handler(struct dhmp_work *work)   /// same as two write
+	if(wwork->flag_write == 1)
+		head_size += wwork->length;
+	temp_all = malloc(head_size);
+	temp_head = temp_all;
+	if(wwork->flag_write == 1)
+	{
+		memcpy(temp_all, wwork->local_addr , wwork->length);
+		temp_head += wwork->length;
+	}
+	memcpy(temp_head, &(wwork->dhmp_addr) ,sizeof(uintptr_t));
+	memcpy(temp_head + sizeof(uintptr_t), &(wwork->local_addr) ,sizeof(uintptr_t));
+	memcpy(temp_head + sizeof(uintptr_t)*2, &(wwork->length), sizeof(size_t));
+	memcpy(temp_head + sizeof(uintptr_t)*2 + sizeof(size_t), &(wwork->flag_write), 1);
+	*(char*)(temp_head + sizeof(uintptr_t)*2 + sizeof(size_t)+1) = 1;//valid
+	
+	local_smr = dhmp_create_smr_per_ops(wwork->rdma_trans, temp_all, head_size);
+
+	struct dhmp_task* task;
+	task = dhmp_write_task_create(wwork->rdma_trans, NULL, 0);
+	if(!task)
+	{
+		ERROR_LOG("allocate memory error.");
+		return -1;
+	}
+	struct ibv_send_wr send_wr,*bad_wr=NULL;
+	struct ibv_sge sge;
+	memset(&send_wr, 0, sizeof(struct ibv_send_wr));
+	send_wr.wr_id= ( uintptr_t ) task;
+	send_wr.opcode=IBV_WR_RDMA_WRITE;
+	send_wr.sg_list=&sge;
+	send_wr.num_sge=1;
+	send_wr.send_flags=IBV_SEND_SIGNALED;
+	send_wr.wr.rdma.remote_addr= ( uintptr_t ) (&client->Herd.S_mr)->addr + wwork->cur * buffer_size;
+	if(wwork->flag_write == 0)
+        send_wr.wr.rdma.remote_addr += wwork->length;
+	send_wr.wr.rdma.rkey= (&client->Herd.S_mr)->rkey;
+	sge.addr= ( uintptr_t ) local_smr->mr->addr;
+	sge.length= head_size;
+	sge.lkey= local_smr->mr->lkey;
+	int err=ibv_post_send ( task->rdma_trans->qp, &send_wr, &bad_wr );
+	if ( err )
+	{
+		ERROR_LOG("ibv_post_send error");
+		exit(-1);
+		return -1;
+	}	
+
+	while(!task->done_flag);	
+	free(task);
+	if(local_smr != NULL)
+	{
+		ibv_dereg_mr(local_smr->mr);
+		free(local_smr);
+	}
+	wwork->done_flag=true;
+	
+}
+
+int amper_FaRM_work_handler(struct dhmp_work *work)   
 {
 	struct amper_L5_work *wwork;
 	wwork=(struct amper_L5_work *)work->work_data;
@@ -619,13 +698,12 @@ int amper_FaRM_work_handler(struct dhmp_work *work)   /// same as two write
 		free(local_smr);
 	}
 	wwork->done_flag=true;
-
-
-
 	
 }
 
-void *FaRM_run_client()
+
+
+void *FaRM_run_client() // 本地core dump的原因
 {
 	int i = 0;
 	char * reply, * valid;
@@ -1253,6 +1331,8 @@ void *dhmp_work_handle_thread(void *data)
 				case AMPER_WORK_RFP:
 					amper_RFP_work_handler(work);
 					break;
+				case AMPER_WORK_Herd:
+					amper_herd_work_handler(work);
 				case DHMP_WORK_WRITE:
 					dhmp_write_work_handler(work);
 					break;

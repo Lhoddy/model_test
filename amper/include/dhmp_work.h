@@ -56,8 +56,10 @@ struct amper_scalable_work{
 	size_t length;
 	int write_type;
 	bool done_flag;
-	struct ibv_mr* rmr;
-	uintptr_t * local_addr;
+	size_t size;
+	char flag_write;
+	char batch;
+	size_t offset;
 };
 
 struct dhmp_RFP_work{
@@ -193,7 +195,8 @@ enum dhmp_work_type{
 	AMPER_WORK_DaRPC,
 	AMPER_WORK_RFP,
 	AMPER_WORK_UD,
-	AMPER_WORK_FaRM
+	AMPER_WORK_FaRM,
+	AMPER_WORK_Herd
 };
 
 

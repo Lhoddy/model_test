@@ -8,7 +8,7 @@
 // #define L5  
 // #define Tailwind  
 // #define DaRPC   
-// #define scalable
+// #define scaleRPC
 // #define RFP   
 
 const double A = 1.3;  
@@ -209,32 +209,27 @@ int main(int argc,char *argv[])
 	for(i=0;i<objnum;i++)	
 		dhmp_free(addr[i]);
 #endif
-#ifdef Tailwind
-	show("start count",&task_time_start);
-	 // for Tailwind
-	model_6_Tailwind(accessnum, objnum, size, str); // only unif ，用的默认的send recv queue 
-	show("over count",&task_time_end); 
-#endif
-#ifdef scalable
-	 batch = BATCH;
+#ifdef scaleRPC
+	batch = BATCH;
 	for(i=0;i<objnum;i++)
 		addr[i]=dhmp_malloc(size,0);
-	dhmp_malloc(size,7); //scalable
+	dhmp_malloc(size,7); //scaleRPC
 	uintptr_t remote_addr;
-	for(j=0;j<(accessnum /100 )* write_part;j++)
+	local_addr = (uintptr_t)str;
+	show("start count",&task_time_start);
+	for(j=0;j<(accessnum /100 )* write_part;j=j+batch)
 	{ 
 		i = j%objnum;
-		local_addr = (uintptr_t)str;
 		remote_addr = (uintptr_t)addr[rand_num[i]];
 		model_7_scalable(&remote_addr, size, &local_addr, 1 , batch);
 	}
-	for(;j<accessnum;j++)
+	for(;j<accessnum;j=j+batch)
 	{ 
 		i = j%objnum;
-		local_addr = (uintptr_t)str;
 		remote_addr = (uintptr_t)addr[rand_num[i]];
 		model_7_scalable(&remote_addr, size, &local_addr, 0 , batch);
 	}
+	show("over count",&task_time_end);
 	for(i=0;i<objnum;i++)	
 		dhmp_free(addr[i]);
 #endif
@@ -297,9 +292,25 @@ int main(int argc,char *argv[])
 #endif
 #ifdef herd
 //need #define UD
-	for(j=0;j<accessnum;j++)
+	for(i=0;i<objnum;i++)
+		addr[i]=dhmp_malloc(size,0);
+	dhmp_malloc(size,9); //for Herd
+
+	show("start count",&task_time_start);
+
+	for(j=0;j<(accessnum /100 )* write_part;j++)
 	{ 
+		i = j%objnum;
+		model_herd(str, size, addr[rand_num[i]], 1); //1 for write
 	}
+	for(;j<accessnum;j++)
+	{ 
+		i = j%objnum;
+		model_herd(str, size, addr[rand_num[i]], 0); //1 for write
+	}
+	show("over count",&task_time_end);
+	for(i=0;i<objnum;i++)	
+		dhmp_free(addr[i]);
 #endif
 
 	

@@ -108,10 +108,10 @@ struct dhmp_server{
 	struct{
 		struct ibv_mr* Sreq_mr;
 		struct ibv_mr* Sdata_mr;
-		struct ibv_mr Creq_mr;
 		struct ibv_mr Cdata_mr;
 		struct ibv_mr* Slocal_mr;
-	}Salable[DHMP_CLIENT_NODE_NUM];
+		size_t size;
+	}scaleRPC[DHMP_CLIENT_NODE_NUM];
 	pthread_t scalable_poll_thread[DHMP_CLIENT_NODE_NUM];
 
 	struct{

@@ -33,7 +33,7 @@
 #define DaRPC_clust_NUM  5
 #define BATCH 1
 #define Tailwind_log_size 100
-#define FaRM_buffer_NUM 5
+#define FaRM_buffer_NUM 5 //both for herd
 
 // #define UD UD
 
@@ -47,9 +47,9 @@
 
 //both
 
-#define L5 L5
+//#define L5 L5
 
-#define FaRM FaRM
+//#define FaRM FaRM
 
 // #define RFP RFP
 
@@ -59,7 +59,7 @@
 // #define DaRPC DaRPC
 //#define DaRPC_SERVER DaRPC_SERVER
 
-// #define scalable scalable
+ #define scaleRPC scaleRPC
 #define Sca1e_Swith_Time 100
 
 
@@ -102,7 +102,8 @@ enum dhmp_msg_type{
 	DHMP_MSG_DaRPC_requeset,
 	DHMP_MSG_DaRPC_response,
 	DHMP_MSG_UD_REQUEST,
-	DHMP_MSG_UD_RESPONSE
+	DHMP_MSG_UD_RESPONSE,
+	DHMP_MSG_herd_RESPONSE
 };
 
 /*struct dhmp_msg:use for passing control message*/
