@@ -120,6 +120,19 @@ struct dhmp_server{
 		pthread_t poll_thread;
 		size_t size;
 	}FaRM[DHMP_CLIENT_NODE_NUM];
+
+	struct{
+		struct ibv_mr C_mr;
+		struct ibv_mr* S_mr;
+		pthread_t poll_thread;
+		size_t size;
+	}herd[DHMP_CLIENT_NODE_NUM];
+
+	struct{
+		struct ibv_mr* S_mr;
+		pthread_t poll_thread;
+		size_t size;
+	}pRDMA[DHMP_CLIENT_NODE_NUM];
 };
 
 extern struct dhmp_server *server;

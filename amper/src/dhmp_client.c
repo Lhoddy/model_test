@@ -295,19 +295,83 @@ int amper_write_L5( void * local_buf, size_t count, void * globle_addr, char fla
 	return 0;
 }
 
-void check_request()
+void check_request(int model)
 {
 	int i;
 	for(i = 0; i< FaRM_buffer_NUM;i++)
 	{
 		pthread_mutex_lock(&client->mutex_request_num);
-		while(client->FaRM.is_available[i] == 0)
+		if(model == 1)
+			while(client->FaRM.is_available[i] == 0)
+			{
+				pthread_mutex_unlock(&client->mutex_request_num);
+				pthread_mutex_lock(&client->mutex_request_num);
+			}
+		else if(model == 2)
 		{
-			pthread_mutex_unlock(&client->mutex_request_num);
-			pthread_mutex_lock(&client->mutex_request_num);
+			while(client->pRDMA.is_available[i].value == 0)
+			{
+				pthread_mutex_unlock(&client->mutex_request_num);
+				pthread_mutex_lock(&client->mutex_request_num);
+			}
 		}
 		pthread_mutex_unlock(&client->mutex_request_num);
 	}
+}
+
+
+
+void amper_pRDMA_write_senderactive( void * local_buf, size_t count, void * globle_addr, char flag_write)
+{
+	struct dhmp_transport *rdma_trans= client->connect_trans; // assume only one server
+	struct amper_L5_work wwork; //L5 = prdma write wflush work
+	struct dhmp_work *work;
+
+	if(!rdma_trans||rdma_trans->trans_state!=DHMP_TRANSPORT_STATE_CONNECTED)
+	{
+		ERROR_LOG("rdma connection error.");
+		return ;
+	}
+
+	work=malloc(sizeof(struct dhmp_work));
+	if(!work)
+	{
+		ERROR_LOG("alloc memory error.");
+		return ;
+	}
+	wwork.done_flag=false;
+	wwork.length=count;
+	wwork.local_addr=local_buf;
+	wwork.rdma_trans=rdma_trans;
+	wwork.dhmp_addr = globle_addr;
+	wwork.flag_write = flag_write;
+			
+	work->work_type=AMPER_WORK_pRDMA_WS;
+	work->work_data=&wwork;
+	
+	while(1)
+	{
+		pthread_mutex_lock(&client->mutex_request_num);
+		if(client->pRDMA.is_available[client->pRDMA.Scur].value == 0)
+		{
+			pthread_mutex_unlock(&client->mutex_request_num);
+			continue;
+		}
+		client->pRDMA.is_available[client->pRDMA.Scur].value  = 0;
+		client->pRDMA.is_available[client->pRDMA.Scur].work = work;
+		wwork.cur = client->pRDMA.Scur;
+		client->pRDMA.Scur= (client->pRDMA.Scur + 1) % FaRM_buffer_NUM;
+		pthread_mutex_unlock(&client->mutex_request_num);
+		break;
+	}
+	
+	pthread_mutex_lock(&client->mutex_work_list);
+	list_add_tail(&work->work_entry, &client->work_list);
+	pthread_mutex_unlock(&client->mutex_work_list);
+	
+	while(!wwork.done_flag);
+	
+	return ;
 }
 
 void model_FaRM( void * local_buf, size_t count, void * globle_addr, char flag_write)
@@ -341,17 +405,18 @@ void model_FaRM( void * local_buf, size_t count, void * globle_addr, char flag_w
 	while(1)
 	{
 		pthread_mutex_lock(&client->mutex_request_num);
-		if(client->herd.is_available[client->herd.Scur] == 0)
+		if(client->FaRM.is_available[client->FaRM.Scur] == 0)
 		{
 			pthread_mutex_unlock(&client->mutex_request_num);
 			continue;
 		}
-		client->herd.is_available[client->herd.Scur] = 0;
-		wwork.cur = client->herd.Scur;
-		client->herd.Scur= (client->herd.Scur + 1) % FaRM_buffer_NUM;
+		client->FaRM.is_available[client->FaRM.Scur] = 0;
+		wwork.cur = client->FaRM.Scur;
+		client->FaRM.Scur= (client->FaRM.Scur + 1) % FaRM_buffer_NUM;
 		pthread_mutex_unlock(&client->mutex_request_num);
 		break;
 	}
+	
 
 	pthread_mutex_lock(&client->mutex_work_list);
 	list_add_tail(&work->work_entry, &client->work_list);
@@ -397,14 +462,14 @@ void model_herd( void * local_buf, size_t count, void * globle_addr, char flag_w
 	while(1)
 	{
 		pthread_mutex_lock(&client->mutex_request_num);
-		if(client->FaRM.is_available[client->FaRM.Scur] == 0)
+		if(client->herd.is_available[client->herd.Scur] == 0)
 		{
 			pthread_mutex_unlock(&client->mutex_request_num);
 			continue;
 		}
-		client->FaRM.is_available[client->FaRM.Scur] = 0;
-		wwork.cur = client->FaRM.Scur;
-		client->FaRM.Scur= (client->FaRM.Scur + 1) % FaRM_buffer_NUM;
+		client->herd.is_available[client->herd.Scur] = 0;
+		wwork.cur = client->herd.Scur;
+		client->herd.Scur= (client->herd.Scur + 1) % FaRM_buffer_NUM;
 		pthread_mutex_unlock(&client->mutex_request_num);
 		break;
 	}
@@ -985,6 +1050,7 @@ struct dhmp_device *dhmp_get_dev_from_client()
 void dhmp_client_init(size_t size,int obj_num)
 {
 	int i;
+	void *temp;
 	
 	client=(struct dhmp_client *)malloc(sizeof(struct dhmp_client));
 	if(!client)
@@ -1045,7 +1111,7 @@ void dhmp_client_init(size_t size,int obj_num)
 		if(client->connect_trans==NULL)
 			continue;
 		while(client->connect_trans->trans_state<DHMP_TRANSPORT_STATE_CONNECTED);
-		void * temp = malloc(8);
+		temp = malloc(8);
 		client->cas_mr = dhmp_create_smr_per_ops(client->connect_trans, temp, 8);
 
 		client->per_ops_mr_addr = malloc(size+1024);//request+data
@@ -1079,9 +1145,22 @@ void dhmp_client_init(size_t size,int obj_num)
 		client->local_mr = client->per_ops_mr->mr;
 	}
 	{//FaRM
-		void*temp = malloc((size+40)*FaRM_buffer_NUM);
+		temp = malloc((size+40)*FaRM_buffer_NUM);
 		client->FaRM.C_mr = dhmp_create_smr_per_ops(client->connect_trans, temp, (size+40)*FaRM_buffer_NUM)->mr;
 	}
+#ifdef pRDMA
+	{
+		temp = malloc(1);
+		client->pRDMA.read_mr = dhmp_create_smr_per_ops(client->connect_trans, temp, 1)->mr;
+		size_t buffer_size = sizeof(uintptr_t)*2 + sizeof(size_t)+ 2 + size;
+		for(i = 0;i< FaRM_buffer_NUM;i++)
+		{
+			temp = malloc(buffer_size);
+			client->pRDMA.C_mr[i] = dhmp_create_smr_per_ops(client->connect_trans, temp, buffer_size)->mr;
+		}
+		
+	}
+#endif
 	client->para_request_num = 5;
 	
 }
@@ -1191,14 +1270,11 @@ void model_D_send(void * server_addr, size_t length, void * local_addr)
 
 void model_1_octopus(void * globle_addr, size_t length, void * local_addr)
 {
-	void * server_addr = GetAddr_request1(globle_addr, length, NULL,NULL); //write imm and lock （imm=node_id+offset）
-	dhmp_write(server_addr, local_addr, length);
-	amper_clover_compare_and_set(globle_addr, length, 0); //unlock per-file;we use object  todo
+	// amper_octopus(globle_addr, globle_addr, local_addr, length); 
 }
 void model_1_octopus_R(void * globle_addr, size_t length, void * local_addr)
 {
-	void * server_addr = GetAddr_request1(globle_addr, length, NULL,NULL); //write imm and no_lock （imm=node_id+offset）
-	dhmp_read(server_addr, local_addr, length);
+	GetAddr_request1(globle_addr, length, NULL,NULL); //write imm and no_lock （imm=node_id+offset）
 }
 
 void model_1_clover(void * space_addr, size_t length, void * local_addr, uintptr_t * point_addr, int offset)//+globle_obj_name

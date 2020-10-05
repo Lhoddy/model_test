@@ -196,7 +196,8 @@ enum dhmp_work_type{
 	AMPER_WORK_RFP,
 	AMPER_WORK_UD,
 	AMPER_WORK_FaRM,
-	AMPER_WORK_Herd
+	AMPER_WORK_Herd,
+	AMPER_WORK_pRDMA_WS
 };
 
 

@@ -47,7 +47,7 @@ void * nvm_malloc(size_t size)
 {
 	void *temp;
 #ifdef NVM
-	temp = numa_alloc_onnode(size,2);
+	temp = numa_alloc_onnode(size,4);
 #else
 	temp = malloc(size);
 #endif
@@ -242,6 +242,11 @@ static void dhmp_malloc_request_handler(struct dhmp_transport* rdma_trans,
 		amper_allocspace_for_server(rdma_trans, 9, response.req_info.req_size); 
 		memcpy(&(response.mr), server->herd[rdma_trans->node_id].S_mr, sizeof(struct ibv_mr));
 	}
+	else if(response.req_info.is_special == 10)// for pRDMA
+	{
+		amper_allocspace_for_server(rdma_trans, 10, response.req_info.req_size); 
+		memcpy(&(response.mr), server->pRDMA[rdma_trans->node_id].S_mr, sizeof(struct ibv_mr));
+	}
 	else
 	{
 		if(response.req_info.req_size <= SINGLE_AREA_SIZE)
@@ -344,6 +349,15 @@ static void dhmp_malloc_response_handler(struct dhmp_transport* rdma_trans,
 		int i;
 		for(i = 0;i < FaRM_buffer_NUM;i++)
 			client->herd.is_available[i] = 1;
+	}
+	else if(response_msg.req_info.is_special == 10)// for pRDMA
+	{
+		memcpy(&(client->pRDMA.S_mr), &response_msg.mr, sizeof(struct ibv_mr));
+		client->pRDMA.size = response_msg.req_info.req_size;
+		client->pRDMA.Scur = 0;
+		int i;
+		for(i = 0;i < FaRM_buffer_NUM;i++)
+			client->pRDMA.is_available[i].value = 1;
 	}
 	else{
 		addr_info=response_msg.req_info.addr_info;
@@ -527,6 +541,9 @@ static void dhmp_wc_recv_handler(struct dhmp_transport* rdma_trans,
 			break;	
 		case DHMP_MSG_herd_RESPONSE:
 			amper_herd_response_handler(rdma_trans,msg);
+			break;
+		case DHMP_MSG_pRDMA_WS_RESPONSE:
+			amper_pRDMA_WS_response_handler(rdma_trans,msg);
 			break;
 			
 		// case 96:
@@ -2407,9 +2424,9 @@ void amper_herd_response_handler(struct dhmp_transport* rdma_trans, struct dhmp_
 	
 	if(write_flag == 0)
 	{
-		void* local_addr = *(char*)(response + 2 + sizeof(uintptr_t));
+		void* local_addr = (void *)*(uintptr_t*)(response + 2 + sizeof(uintptr_t));
 		size_t size = *(char*)(response + 2 + sizeof(uintptr_t)*2);
-		response += (response + 2 + sizeof(uintptr_t)*2 + sizeof(size_t));
+		response = (response + 2 + sizeof(uintptr_t)*2 + sizeof(size_t));
 		memcpy(local_addr, response , size);
 	}
 
@@ -2419,3 +2436,27 @@ void amper_herd_response_handler(struct dhmp_transport* rdma_trans, struct dhmp_
 
 	INFO_LOG("herd flush ");
 }
+
+void amper_pRDMA_WS_response_handler(struct dhmp_transport* rdma_trans, struct dhmp_msg* msg)
+{
+	void* response = msg->data;
+	char write_flag = *(char*)response;
+	char cur = *(char*)(response+1);
+	
+	if(write_flag == 0)
+	{
+		void* local_addr = (void *)*(uintptr_t*)(response + 2 + sizeof(uintptr_t));
+		size_t size = *(char*)(response + 2 + sizeof(uintptr_t)*2);
+		response = (response + 2 + sizeof(uintptr_t)*2 + sizeof(size_t));
+		memcpy(local_addr, response , size);
+	}
+
+	pthread_mutex_lock(&client->mutex_request_num);
+	client->pRDMA.is_available[cur].value = 1;
+	// free(client->pRDMA.is_available[cur].task);??????
+	
+	pthread_mutex_unlock(&client->mutex_request_num);
+
+	INFO_LOG("pRDMA request over ");
+}
+

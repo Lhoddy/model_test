@@ -1,7 +1,7 @@
 #include <stdio.h>
 
 #include "dhmp.h"
-#define  obj_num_max  10005
+#define  obj_num_max  1005
 
 // #define octopus 
 // #define clover  
@@ -79,8 +79,8 @@ int main(int argc,char *argv[])
 	else
 	{
 		size=atoi(argv[1]);
-		objnum=10000;//atoi(argv[2]);
-		accessnum = 300000;//atoi(argv[3]);
+		objnum=1000;//atoi(argv[2]);
+		accessnum = 3000;//atoi(argv[3]);
 		write_part = atoi(argv[2]);
 	}
 	pick();
@@ -182,7 +182,7 @@ int main(int argc,char *argv[])
 	}
 	show("over count",&task_time_end);
 
-	check_request();
+	check_request(1);
 	for(i=0;i<objnum;i++)	
 		dhmp_free(addr[i]);
 #endif
@@ -312,7 +312,27 @@ int main(int argc,char *argv[])
 	for(i=0;i<objnum;i++)	
 		dhmp_free(addr[i]);
 #endif
+#ifdef pRDMA
+	for(i=0;i<objnum;i++)
+		addr[i]=dhmp_malloc(size,0);
+	dhmp_malloc(size,10); //for pRDMA
 
+	show("start count",&task_time_start);
+	for(j=0;j<(accessnum /100 )* write_part;j++)
+	{ 
+		i = j%objnum;
+		amper_pRDMA_write_senderactive(str, size, addr[rand_num[i]], 1); //1 for write
+	}
+	for(;j<accessnum;j++)
+	{ 
+		i = j%objnum;
+		amper_pRDMA_write_senderactive(str, size, addr[rand_num[i]], 0); //1 for write
+	}
+	show("over count",&task_time_end);
+	check_request(2);
+	for(i=0;i<objnum;i++)	
+		dhmp_free(addr[i]);
+#endif
 	
 	task_time_diff_ns = ((task_time_end.tv_sec * 1000000000) + task_time_end.tv_nsec) -
                         ((task_time_start.tv_sec * 1000000000) + task_time_start.tv_nsec);

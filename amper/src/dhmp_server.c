@@ -503,10 +503,75 @@ void *herd_run(void* arg1)
 		i = (i + 1) % FaRM_buffer_NUM;
 		reply = server->herd[node_id].S_mr->addr + size + (i * buffer_size);
 		valid = reply + (sizeof(uintptr_t)*2 + sizeof(size_t) + 1);
+
+
 	}
 
 	return;
 }
+
+void *pRDMA_run(void* arg1)
+{
+	int node_id = *(int*) arg1;
+	int i = 0;
+	INFO_LOG("start pRDMA_run epoll");
+	char * reply, * valid;
+	char write_flag;
+	void* local_addr,*server_addr;
+	size_t size =  server->pRDMA[node_id].size;
+	size_t buffer_size = sizeof(uintptr_t)*2 + sizeof(size_t) + 2 + size;
+	reply = server->pRDMA[node_id].S_mr->addr + size;
+	valid = reply + (sizeof(uintptr_t)*2 + sizeof(size_t) + 1);
+	while(1)
+	{
+		if(server->pRDMA[node_id].size == 0)
+		{
+			break;
+		}
+		if(*valid == 0)
+			continue;
+		*valid = 0;
+		INFO_LOG("get new pRDMA messge");
+		server_addr = (void*)*(uintptr_t*)reply;
+		local_addr = (void*)*(uintptr_t*)(reply + sizeof(uintptr_t));
+		write_flag = *(reply + sizeof(uintptr_t)*2 + sizeof(size_t));
+		INFO_LOG("get new pRDMA messge %p %p %d",server_addr,local_addr,write_flag);
+		size_t reply_size = sizeof(uintptr_t)*2 + sizeof(size_t) + 2;
+		if(write_flag == 0)
+			reply_size += size;          
+		void *respond = malloc(reply_size);
+		void * temp = respond;
+		*(char*)(temp) = write_flag;
+		*(char *)(temp + 1) = i;
+		*(uintptr_t*)(temp + 2) = (uintptr_t)server_addr;
+		*(uintptr_t*)(temp + 2 + sizeof(uintptr_t)) = (uintptr_t)local_addr;
+		*(size_t*)(temp + 2 + sizeof(uintptr_t)*2) = size;
+		temp += (2+ sizeof(uintptr_t)*2 + sizeof(size_t));
+		if(write_flag == 1)
+		{
+			memcpy(server_addr, server->pRDMA[node_id].S_mr->addr + i * buffer_size, size);
+			_mm_clflush(server_addr);
+		}
+		else
+			memcpy(temp, server_addr, size);
+
+		struct dhmp_msg res_msg;
+		res_msg.msg_type=DHMP_MSG_pRDMA_WS_RESPONSE;
+		res_msg.data_size= reply_size;
+		res_msg.data= respond;
+		struct dhmp_task * task = dhmp_post_send(server->connect_trans[node_id], &res_msg); 
+		while(!task->done_flag);
+		free(task);
+		free(respond);
+
+		i = (i + 1) % FaRM_buffer_NUM;
+		reply = server->pRDMA[node_id].S_mr->addr + size + (i * buffer_size);
+		valid = reply + (sizeof(uintptr_t)*2 + sizeof(size_t) + 1);
+	}
+
+	return;
+}
+
 
 void amper_scalable_request_handler(int node_id, char batch, char write_type, char write_flag, size_t size)
 { 
@@ -854,7 +919,7 @@ void amper_allocspace_for_server(struct dhmp_transport* rdma_trans, int is_speci
 			pthread_create(&(server->FaRM[node_id].poll_thread), NULL, FaRM_run, &node_id);
 		}
 		break;
-		case 8: // for herd
+		case 9: // for herd
 		{
 			size_t totol_length = 1 + 1 + sizeof(uintptr_t)*2 + sizeof(size_t) + size; // batch + writeORread + readmr  
 			temp = nvm_malloc(totol_length * FaRM_buffer_NUM); 
@@ -862,6 +927,16 @@ void amper_allocspace_for_server(struct dhmp_transport* rdma_trans, int is_speci
 			server->herd[node_id].S_mr = temp_smr->mr;
 			server->herd[node_id].size = size;
 			pthread_create(&(server->herd[node_id].poll_thread), NULL, herd_run, &node_id);
+		}
+		break;
+		case 10: // for pRDMA
+		{
+			size_t totol_length = 1 + 1 + sizeof(uintptr_t)*2 + sizeof(size_t) + size; // batch + writeORread + readmr  
+			temp = nvm_malloc(totol_length * FaRM_buffer_NUM); 
+			temp_smr = dhmp_create_smr_per_ops(rdma_trans, temp, totol_length * FaRM_buffer_NUM);
+			server->pRDMA[node_id].S_mr = temp_smr->mr;
+			server->pRDMA[node_id].size = size;
+			pthread_create(&(server->pRDMA[node_id].poll_thread), NULL, pRDMA_run, &node_id);
 		}
 		break;
 	};

@@ -567,69 +567,69 @@ int amper_L5_work_handler(struct dhmp_work *work)   /// same as two write
 
 int amper_herd_work_handler(struct dhmp_work *work)   
 {
-	struct amper_L5_work *wwork;
-	wwork=(struct amper_L5_work *)work->work_data;
-	struct dhmp_send_mr* local_smr = NULL ;
+	// struct amper_L5_work *wwork;
+	// wwork=(struct amper_L5_work *)work->work_data;
+	// struct dhmp_send_mr* local_smr = NULL ;
 	
-	size_t head_size = sizeof(uintptr_t)*2 + sizeof(size_t)+2;
-	size_t buffer_size = head_size + wwork->length;
-	void *temp_head ,*temp_all;
+	// size_t head_size = sizeof(uintptr_t)*2 + sizeof(size_t)+2;
+	// size_t buffer_size = head_size + wwork->length;
+	// void *temp_head ,*temp_all;
 
-	if(wwork->flag_write == 1)
-		head_size += wwork->length;
-	temp_all = malloc(head_size);
-	temp_head = temp_all;
-	if(wwork->flag_write == 1)
-	{
-		memcpy(temp_all, wwork->local_addr , wwork->length);
-		temp_head += wwork->length;
-	}
-	memcpy(temp_head, &(wwork->dhmp_addr) ,sizeof(uintptr_t));
-	memcpy(temp_head + sizeof(uintptr_t), &(wwork->local_addr) ,sizeof(uintptr_t));
-	memcpy(temp_head + sizeof(uintptr_t)*2, &(wwork->length), sizeof(size_t));
-	memcpy(temp_head + sizeof(uintptr_t)*2 + sizeof(size_t), &(wwork->flag_write), 1);
-	*(char*)(temp_head + sizeof(uintptr_t)*2 + sizeof(size_t)+1) = 1;//valid
+	// if(wwork->flag_write == 1)
+	// 	head_size += wwork->length;
+	// temp_all = malloc(head_size);
+	// temp_head = temp_all;
+	// if(wwork->flag_write == 1)
+	// {
+	// 	memcpy(temp_all, wwork->local_addr , wwork->length);
+	// 	temp_head += wwork->length;
+	// }
+	// memcpy(temp_head, &(wwork->dhmp_addr) ,sizeof(uintptr_t));
+	// memcpy(temp_head + sizeof(uintptr_t), &(wwork->local_addr) ,sizeof(uintptr_t));
+	// memcpy(temp_head + sizeof(uintptr_t)*2, &(wwork->length), sizeof(size_t));
+	// memcpy(temp_head + sizeof(uintptr_t)*2 + sizeof(size_t), &(wwork->flag_write), 1);
+	// *(char*)(temp_head + sizeof(uintptr_t)*2 + sizeof(size_t)+1) = 1;//valid
 	
-	local_smr = dhmp_create_smr_per_ops(wwork->rdma_trans, temp_all, head_size);
+	// local_smr = dhmp_create_smr_per_ops(wwork->rdma_trans, temp_all, head_size);
 
-	struct dhmp_task* task;
-	task = dhmp_write_task_create(wwork->rdma_trans, NULL, 0);
-	if(!task)
-	{
-		ERROR_LOG("allocate memory error.");
-		return -1;
-	}
-	struct ibv_send_wr send_wr,*bad_wr=NULL;
-	struct ibv_sge sge;
-	memset(&send_wr, 0, sizeof(struct ibv_send_wr));
-	send_wr.wr_id= ( uintptr_t ) task;
-	send_wr.opcode=IBV_WR_RDMA_WRITE;
-	send_wr.sg_list=&sge;
-	send_wr.num_sge=1;
-	send_wr.send_flags=IBV_SEND_SIGNALED;
-	send_wr.wr.rdma.remote_addr= ( uintptr_t ) (&client->Herd.S_mr)->addr + wwork->cur * buffer_size;
-	if(wwork->flag_write == 0)
-        send_wr.wr.rdma.remote_addr += wwork->length;
-	send_wr.wr.rdma.rkey= (&client->Herd.S_mr)->rkey;
-	sge.addr= ( uintptr_t ) local_smr->mr->addr;
-	sge.length= head_size;
-	sge.lkey= local_smr->mr->lkey;
-	int err=ibv_post_send ( task->rdma_trans->qp, &send_wr, &bad_wr );
-	if ( err )
-	{
-		ERROR_LOG("ibv_post_send error");
-		exit(-1);
-		return -1;
-	}	
+	// struct dhmp_task* task;
+	// task = dhmp_write_task_create(wwork->rdma_trans, NULL, 0);
+	// if(!task)
+	// {
+	// 	ERROR_LOG("allocate memory error.");
+	// 	return -1;
+	// }
+	// struct ibv_send_wr send_wr,*bad_wr=NULL;
+	// struct ibv_sge sge;
+	// memset(&send_wr, 0, sizeof(struct ibv_send_wr));
+	// send_wr.wr_id= ( uintptr_t ) task;
+	// send_wr.opcode=IBV_WR_RDMA_WRITE;
+	// send_wr.sg_list=&sge;
+	// send_wr.num_sge=1;
+	// send_wr.send_flags=IBV_SEND_SIGNALED;
+	// send_wr.wr.rdma.remote_addr= ( uintptr_t ) (&client->Herd.S_mr)->addr + wwork->cur * buffer_size;
+	// if(wwork->flag_write == 0)
+ //        send_wr.wr.rdma.remote_addr += wwork->length;
+	// send_wr.wr.rdma.rkey= (&client->Herd.S_mr)->rkey;
+	// sge.addr= ( uintptr_t ) local_smr->mr->addr;
+	// sge.length= head_size;
+	// sge.lkey= local_smr->mr->lkey;
+	// int err=ibv_post_send ( task->rdma_trans->qp, &send_wr, &bad_wr );
+	// if ( err )
+	// {
+	// 	ERROR_LOG("ibv_post_send error");
+	// 	exit(-1);
+	// 	return -1;
+	// }	
 
-	while(!task->done_flag);	
-	free(task);
-	if(local_smr != NULL)
-	{
-		ibv_dereg_mr(local_smr->mr);
-		free(local_smr);
-	}
-	wwork->done_flag=true;
+	// while(!task->done_flag);	
+	// free(task);
+	// if(local_smr != NULL)
+	// {
+	// 	ibv_dereg_mr(local_smr->mr);
+	// 	free(local_smr);
+	// }
+	// wwork->done_flag=true;
 	
 }
 
@@ -737,6 +737,97 @@ void *FaRM_run_client() // 本地core dump的原因
 	return;
 }
 
+
+
+int amper_pRDMA_WS_work_handler(struct dhmp_work *work)   
+{
+	struct amper_L5_work *wwork;
+	wwork=(struct amper_L5_work *)work->work_data;
+	struct dhmp_send_mr* local_smr = NULL ;
+	
+	size_t head_size = sizeof(uintptr_t)*2 + sizeof(size_t)+2;
+	size_t buffer_size = head_size + wwork->length;
+	void *temp_head ,*temp_all;
+
+	if(wwork->flag_write == 1)
+		head_size += wwork->length;
+	temp_all = client->pRDMA.C_mr[wwork->cur]->addr;
+	temp_head = temp_all;
+	if(wwork->flag_write == 1)
+	{
+		memcpy(temp_all, wwork->local_addr , wwork->length);
+		temp_head += wwork->length;
+	}
+	*(uintptr_t*)temp_head =(uintptr_t) wwork->dhmp_addr;
+	*(uintptr_t*)(temp_head + sizeof(uintptr_t)) =(uintptr_t) wwork->local_addr;
+	*(size_t*)(temp_head + sizeof(uintptr_t)*2) = wwork->length;
+	*(char*)(temp_head + sizeof(uintptr_t)*2 + sizeof(size_t)) = wwork->flag_write;
+	// memcpy(temp_head, &(wwork->dhmp_addr) ,sizeof(uintptr_t));
+	// memcpy(temp_head + sizeof(uintptr_t), &(wwork->local_addr) ,sizeof(uintptr_t));
+	// memcpy(temp_head + sizeof(uintptr_t)*2, &(wwork->length), sizeof(size_t));
+	// memcpy(temp_head + sizeof(uintptr_t)*2 + sizeof(size_t), &(wwork->flag_write), 1);
+	*(char*)(temp_head + sizeof(uintptr_t)*2 + sizeof(size_t)+1) = 1;//valid
+
+	struct dhmp_task* task;
+	task = dhmp_write_task_create(wwork->rdma_trans, NULL, 0);
+	if(!task)
+	{
+		ERROR_LOG("allocate memory error.");
+		return -1;
+	}
+	struct ibv_send_wr send_wr,*bad_wr=NULL;
+	struct ibv_sge sge;
+	memset(&send_wr, 0, sizeof(struct ibv_send_wr));
+	send_wr.wr_id= ( uintptr_t ) task;
+	send_wr.opcode=IBV_WR_RDMA_WRITE;
+	send_wr.sg_list=&sge;
+	send_wr.num_sge=1;
+	send_wr.send_flags=IBV_SEND_SIGNALED;
+	send_wr.wr.rdma.remote_addr= ( uintptr_t ) (&client->pRDMA.S_mr)->addr + wwork->cur * buffer_size;
+	if(wwork->flag_write == 0)
+        send_wr.wr.rdma.remote_addr += wwork->length;
+	send_wr.wr.rdma.rkey= (&client->pRDMA.S_mr)->rkey;
+	sge.addr= ( uintptr_t ) client->pRDMA.C_mr[wwork->cur]->addr;
+	sge.length= head_size;
+	sge.lkey= client->pRDMA.C_mr[wwork->cur]->lkey;
+	int err=ibv_post_send ( task->rdma_trans->qp, &send_wr, &bad_wr );
+	if ( err )
+	{
+		ERROR_LOG("ibv_post_send error");
+		exit(-1);
+		return -1;
+	}	
+	//RDMA WFLUSH
+	{
+		struct dhmp_task* task2;
+		task2 = dhmp_read_task_create(wwork->rdma_trans, NULL, 0);
+		if(!task2)
+		{
+			ERROR_LOG("allocate memory error.");
+			return -1;
+		}
+		struct ibv_sge sge;
+		struct ibv_send_wr send_wr,*bad_wr=NULL;
+		memset(&send_wr, 0, sizeof(struct ibv_send_wr));
+		send_wr.wr_id= ( uintptr_t ) task2;
+		send_wr.opcode=IBV_WR_RDMA_READ;
+		send_wr.sg_list=&sge;
+		send_wr.num_sge=1;
+		send_wr.send_flags=IBV_SEND_SIGNALED;
+		send_wr.wr.rdma.remote_addr= ( uintptr_t ) (&client->pRDMA.S_mr)->addr + (wwork->cur+1) * buffer_size - 1; //last 1 byte write 
+		send_wr.wr.rdma.rkey= (&client->pRDMA.S_mr)->rkey;
+		sge.addr= ( uintptr_t ) client->pRDMA.read_mr->addr;
+		sge.length= 1;
+		sge.lkey= client->pRDMA.read_mr->lkey;
+		ibv_post_send ( wwork->rdma_trans->qp, &send_wr, &bad_wr );
+		while(!task2->done_flag);	
+		free(task2);
+	}
+	while(!task->done_flag);	
+	free(task);
+	wwork->done_flag=true;
+	
+}
 
 void amper_Tailwind_RPC_work_handler(struct dhmp_work *work) 
 {
@@ -1337,6 +1428,10 @@ void *dhmp_work_handle_thread(void *data)
 					break;
 				case AMPER_WORK_Herd:
 					amper_herd_work_handler(work);
+					break;
+				case AMPER_WORK_pRDMA_WS:
+					amper_pRDMA_WS_work_handler(work);
+					break;
 				case DHMP_WORK_WRITE:
 					dhmp_write_work_handler(work);
 					break;

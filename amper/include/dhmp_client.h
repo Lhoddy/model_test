@@ -98,6 +98,29 @@ struct dhmp_client{
 		int is_available[FaRM_buffer_NUM];
 		size_t size;
 	}FaRM;
+
+	struct{
+		struct ibv_mr S_mr;
+		struct ibv_mr* C_mr;
+		int Scur;
+		int Ccur;
+		pthread_t poll_thread;
+		int is_available[FaRM_buffer_NUM];
+		size_t size;
+	}herd;
+
+	struct{
+		struct ibv_mr S_mr;
+		struct ibv_mr* C_mr[FaRM_buffer_NUM];
+		int Scur;
+		pthread_t poll_thread;
+		struct {
+			char value;
+			void * work;
+		}is_available[FaRM_buffer_NUM];
+		size_t size;
+		struct ibv_mr* read_mr;
+	}pRDMA;
 	
 	
 };

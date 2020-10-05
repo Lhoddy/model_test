@@ -115,5 +115,8 @@ void amper_DaRPC_response_handler(struct dhmp_transport* rdma_trans, struct dhmp
 
 void amper_UD_request_handler(struct dhmp_transport* rdma_trans, struct dhmp_msg* msg);
 void amper_UD_response_handler(struct dhmp_transport* rdma_trans, struct dhmp_msg* msg);
+
+void amper_herd_response_handler(struct dhmp_transport* rdma_trans, struct dhmp_msg* msg);
+void amper_pRDMA_WS_response_handler(struct dhmp_transport* rdma_trans, struct dhmp_msg* msg);
 #endif
 
