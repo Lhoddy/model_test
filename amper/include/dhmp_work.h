@@ -197,7 +197,8 @@ enum dhmp_work_type{
 	AMPER_WORK_UD,
 	AMPER_WORK_FaRM,
 	AMPER_WORK_Herd,
-	AMPER_WORK_pRDMA_WS
+	AMPER_WORK_pRDMA_WS,
+	DHMP_WORK_Octopus
 };
 
 
@@ -210,9 +211,12 @@ struct dhmp_work{
 struct dhmp_UD_work{
 	struct dhmp_transport *rdma_trans;
 	size_t length;
+	uintptr_t * globle_addr;
 	uintptr_t * local_addr;
 	bool recv_flag;
 	bool done_flag;
+	char batch;
+	char flag_write;
 };
 
 void *dhmp_work_handle_thread(void *data);

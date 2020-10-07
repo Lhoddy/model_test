@@ -119,6 +119,7 @@ struct dhmp_server{
 		struct ibv_mr* S_mr;
 		pthread_t poll_thread;
 		size_t size;
+		struct ibv_mr* local_mr;
 	}FaRM[DHMP_CLIENT_NODE_NUM];
 
 	struct{
@@ -133,6 +134,13 @@ struct dhmp_server{
 		pthread_t poll_thread;
 		size_t size;
 	}pRDMA[DHMP_CLIENT_NODE_NUM];
+
+
+	struct{
+		struct ibv_mr C_mr;
+		struct ibv_mr* local_mr;
+		struct ibv_mr* S_mr;
+	}octo[DHMP_CLIENT_NODE_NUM];
 };
 
 extern struct dhmp_server *server;

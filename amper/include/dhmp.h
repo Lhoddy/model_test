@@ -22,6 +22,11 @@
 #include "json-c/json.h"
 #include <x86intrin.h> 
 
+#define NUM_writeImm3 ((uint32_t)-3)
+#define NUM_writeImm2 ((uint32_t)-2)
+#define NUM_octo_req ((uint32_t)-4)
+#define NUM_octo_res ((uint32_t)-5)
+
 //#define FLUSH1 FLUSH1
 // #define FLUSH2 FLUSH2
 
@@ -104,7 +109,9 @@ enum dhmp_msg_type{
 	DHMP_MSG_UD_REQUEST,
 	DHMP_MSG_UD_RESPONSE,
 	DHMP_MSG_herd_RESPONSE,
-	DHMP_MSG_pRDMA_WS_RESPONSE
+	DHMP_MSG_pRDMA_WS_RESPONSE,
+	DHMP_MSG_OCTO_REQUEST,
+	DHMP_MSG_OCTO_RESPONSE
 };
 
 /*struct dhmp_msg:use for passing control message*/
@@ -204,6 +211,7 @@ struct dhmp_WriteImm2_request{
 	enum dhmp_msg_type msg_type;
 	size_t req_size;
 	void * server_addr;
+	void* client_addr;
 	void * task;
 };
 
@@ -258,7 +266,7 @@ struct dhmp_TailwindRPC_response{
 struct dhmp_DaRPC_request{
 	size_t req_size;
 	uintptr_t * local_addr;
-	void * task;
+	void* work;
 };
 
 struct dhmp_DaRPC_response{
@@ -279,6 +287,16 @@ struct dhmp_UD_response{
 	int write_flag;
 	int batch;
 };
+
+struct dhmp_octo_request{
+	size_t req_size;
+	void * server_addr;
+	void* client_addr;
+	void * task;
+	char flag_write;
+};
+
+
 
 
 
@@ -347,7 +365,7 @@ void model_D_write(void * server_addr, size_t length, void * local_addr);
 void model_D_writeImm(void * server_addr, size_t length, void * local_addr);
 void model_D_send(void * server_addr, size_t length, void * local_addr);
 
-void model_1_octopus(void * globle_addr, size_t length, void * local_addr);
+void  model_1_octopus(void * globle_addr, size_t length, void * local_addr,char flag_write)
 void model_1_octopus_R(void * globle_addr, size_t length, void * local_addr);
 void model_1_clover(void * space_addr, size_t length, void * local_addr, uintptr_t* point_addr,int offset);
 void model_1_clover_R(size_t length, void * local_addr, void* dhmp_addr);

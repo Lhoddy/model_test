@@ -47,7 +47,8 @@ struct dhmp_client{
 	void * per_ops_mr_addr2;
 
 	struct ibv_mr* local_mr;
-	struct ibv_mr read_mr_for_all;
+	struct ibv_mr read_mr_for_SFlush;
+	int count_post_send_for_SFlush;
 	pthread_mutex_t mutex_request_num;
 	int para_request_num;
 
@@ -60,6 +61,8 @@ struct dhmp_client{
 
 	struct{
 		struct ibv_mr* C_mr;
+		struct ibv_mr* local_mr;
+		struct ibv_mr S_mr;
 	}octo;
 
 	struct{
@@ -78,6 +81,7 @@ struct dhmp_client{
 		struct ibv_mr write_mr;
 		struct ibv_mr read_mr;
 		char time;
+		struct dhmp_send_mr* local_smr;
 	}RFP;
 
 	struct{
@@ -97,6 +101,8 @@ struct dhmp_client{
 		pthread_t poll_thread;
 		int is_available[FaRM_buffer_NUM];
 		size_t size;
+		struct ibv_mr* local_mr[FaRM_buffer_NUM];
+		struct ibv_mr* read_mr;
 	}FaRM;
 
 	struct{

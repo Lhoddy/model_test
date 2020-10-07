@@ -315,6 +315,14 @@ void check_request(int model)
 				pthread_mutex_lock(&client->mutex_request_num);
 			}
 		}
+		else if(model == 3)
+		{
+			while(client->para_request_num != FaRM_buffer_NUM)
+			{
+				pthread_mutex_unlock(&client->mutex_request_num);
+				pthread_mutex_lock(&client->mutex_request_num);
+			}
+		}
 		pthread_mutex_unlock(&client->mutex_request_num);
 	}
 }
@@ -399,9 +407,11 @@ void model_FaRM( void * local_buf, size_t count, void * globle_addr, char flag_w
 	wwork.dhmp_addr = globle_addr;
 	wwork.flag_write = flag_write;
 			
-	work->work_type=AMPER_WORK_Herd;
+	work->work_type=AMPER_WORK_FaRM;
 	work->work_data=&wwork;
-	
+
+	wwork.cur = client->FaRM.Scur;
+
 	while(1)
 	{
 		pthread_mutex_lock(&client->mutex_request_num);
@@ -412,11 +422,13 @@ void model_FaRM( void * local_buf, size_t count, void * globle_addr, char flag_w
 		}
 		client->FaRM.is_available[client->FaRM.Scur] = 0;
 		wwork.cur = client->FaRM.Scur;
+#ifdef WFLUSH
 		client->FaRM.Scur= (client->FaRM.Scur + 1) % FaRM_buffer_NUM;
+#endif
 		pthread_mutex_unlock(&client->mutex_request_num);
 		break;
 	}
-	
+
 
 	pthread_mutex_lock(&client->mutex_work_list);
 	list_add_tail(&work->work_entry, &client->work_list);
@@ -456,7 +468,7 @@ void model_herd( void * local_buf, size_t count, void * globle_addr, char flag_w
 	wwork.dhmp_addr = globle_addr;
 	wwork.flag_write = flag_write;
 			
-	work->work_type=AMPER_WORK_FaRM;
+	work->work_type=AMPER_WORK_Herd;
 	work->work_data=&wwork;
 	
 	while(1)
@@ -640,7 +652,8 @@ int amper_sendRPC_DaRPC( uintptr_t * globle_addr , size_t length, uintptr_t * lo
 			
 	work->work_type=AMPER_WORK_DaRPC;
 	work->work_data=&wwork;
-	
+
+#ifdef SFLUSH
 	while(1)
 	{
 		pthread_mutex_lock(&client->mutex_request_num);
@@ -653,7 +666,7 @@ int amper_sendRPC_DaRPC( uintptr_t * globle_addr , size_t length, uintptr_t * lo
 		pthread_mutex_unlock(&client->mutex_request_num);
 		break;
 	}
-
+#endif
 	pthread_mutex_lock(&client->mutex_work_list);
 	list_add_tail(&work->work_entry, &client->work_list);
 	pthread_mutex_unlock(&client->mutex_work_list);
@@ -865,10 +878,10 @@ int dhmp_write_imm(void *dhmp_addr, void * local_buf, size_t length, uint32_t ta
 	return 0;
 }
 
-int dhmp_write_imm2(void * server_addr,void *dhmp_addr, void * local_buf, size_t length)
+int dhmp_write_imm2(void *dhmp_addr, void * local_addr, size_t length, char flag_write)
 {
 	struct dhmp_transport *rdma_trans=NULL;
-	struct dhmp_writeImm2_work wwork;
+	struct amper_L5_work wwork;
 	struct dhmp_work *work;
 
 	rdma_trans=dhmp_get_trans_from_addr(dhmp_addr);
@@ -885,15 +898,13 @@ int dhmp_write_imm2(void * server_addr,void *dhmp_addr, void * local_buf, size_t
 		return -1;
 	}
 	wwork.done_flag=false;
-	wwork.recv_flag = false;
 	wwork.length=length;
 	wwork.rdma_trans=rdma_trans;
-	wwork.local_addr = local_buf;
-	wwork.dhmp_addr = dhmp_addr;	
-	wwork.server_addr = server_addr;
-	wwork.S_ringMR = &(client->ringbuffer.mr);
+	wwork.local_addr = local_addr;
+	wwork.dhmp_addr = dhmp_addr;
+	wwork.flag_write = flag_write;
 			
-	work->work_type=DHMP_WORK_WRITEIMM2;
+	work->work_type=DHMP_WORK_Octopus;
 	work->work_data=&wwork;
 	
 	pthread_mutex_lock(&client->mutex_work_list);
@@ -942,7 +953,6 @@ int dhmp_write_imm3(void *dhmp_addr, void * local_buf, size_t length)
 	list_add_tail(&work->work_entry, &client->work_list);
 	pthread_mutex_unlock(&client->mutex_work_list);
 	
-//	dhmp_WriteImm3_work_handler(work);
 	while(!wwork.done_flag);
 	free(work);
 	return 0;
@@ -1051,6 +1061,7 @@ void dhmp_client_init(size_t size,int obj_num)
 {
 	int i;
 	void *temp;
+	size_t buffer_size;
 	
 	client=(struct dhmp_client *)malloc(sizeof(struct dhmp_client));
 	if(!client)
@@ -1122,7 +1133,7 @@ void dhmp_client_init(size_t size,int obj_num)
 		client->per_ops_mr2 =dhmp_create_smr_per_ops(client->connect_trans, client->per_ops_mr_addr2, size+1024);
 	}
 
-
+	
 	
 	/*init the structure about work thread*/
 	pthread_mutex_init(&client->mutex_work_list, NULL);
@@ -1131,28 +1142,59 @@ void dhmp_client_init(size_t size,int obj_num)
 	pthread_create(&client->work_thread, NULL, dhmp_work_handle_thread, (void*)client);
 
 	// dhmp_malloc(0,1);// ringbuffer
+	{//octo
+		buffer_size =  sizeof(struct dhmp_octo_request) + size; // batch + writeORread + readmr  
+		temp = malloc(buffer_size); 
+		client->octo.C_mr  = dhmp_create_smr_per_ops(client->connect_trans, temp, buffer_size )->mr;
+		temp = malloc(buffer_size); 
+		client->octo.local_mr = dhmp_create_smr_per_ops(client->connect_trans, temp, buffer_size)->mr;
+		
+	}
 	{//scaleRPC
 		client->scaleRPC.Creq_mr = client->per_ops_mr->mr;
 		client->scaleRPC.Cdata_mr = client->per_ops_mr2->mr;
 	}
 	{//L5
 		client->local_mr = client->per_ops_mr->mr;
-		size_t head_size = sizeof(uintptr_t) + sizeof(size_t)+1;
-		void *temp_head = malloc(head_size);
-		client->L5.local_smr1 = dhmp_create_smr_per_ops(client->connect_trans, temp_head, head_size);
+		buffer_size = sizeof(uintptr_t) + sizeof(size_t)+1 + size;
+		temp = malloc(buffer_size);
+		client->L5.local_smr1 = dhmp_create_smr_per_ops(client->connect_trans, temp, buffer_size);
+	}
+	{//RFP
+		buffer_size = sizeof(uintptr_t) + sizeof(size_t)+2+ size;
+		temp = malloc(buffer_size);
+		client->RFP.local_smr = dhmp_create_smr_per_ops(client->connect_trans, temp, buffer_size);
 	}
 	{//tailwind
 		client->local_mr = client->per_ops_mr->mr;
 	}
 	{//FaRM
-		temp = malloc((size+40)*FaRM_buffer_NUM);
-		client->FaRM.C_mr = dhmp_create_smr_per_ops(client->connect_trans, temp, (size+40)*FaRM_buffer_NUM)->mr;
+		buffer_size = sizeof(uintptr_t)*2 + sizeof(size_t)+2 + size;
+		for(i = 0;i< FaRM_buffer_NUM;i++)
+		{
+			temp = malloc(buffer_size);
+			client->FaRM.local_mr[i] = dhmp_create_smr_per_ops(client->connect_trans, temp, buffer_size)->mr;
+		}
+		temp = malloc(buffer_size*FaRM_buffer_NUM);
+		client->FaRM.C_mr = dhmp_create_smr_per_ops(client->connect_trans, temp, buffer_size*FaRM_buffer_NUM)->mr;
+#ifdef WFLUSH
+		{
+			temp = malloc(1);
+			client->FaRM.read_mr = dhmp_create_smr_per_ops(client->connect_trans, temp, 1)->mr;
+		}
+#endif
 	}
+
+#ifdef SFLUSH
+	client->count_post_send_for_SFlush = 0;
+	temp = malloc(1);
+	client->pRDMA.read_mr = dhmp_create_smr_per_ops(client->connect_trans, temp, 1)->mr;
+#endif
 #ifdef pRDMA
 	{
 		temp = malloc(1);
 		client->pRDMA.read_mr = dhmp_create_smr_per_ops(client->connect_trans, temp, 1)->mr;
-		size_t buffer_size = sizeof(uintptr_t)*2 + sizeof(size_t)+ 2 + size;
+		buffer_size = sizeof(uintptr_t)*2 + sizeof(size_t)+ 2 + size;
 		for(i = 0;i< FaRM_buffer_NUM;i++)
 		{
 			temp = malloc(buffer_size);
@@ -1161,7 +1203,7 @@ void dhmp_client_init(size_t size,int obj_num)
 		
 	}
 #endif
-	client->para_request_num = 5;
+	client->para_request_num = FaRM_buffer_NUM;
 	
 }
 
@@ -1259,7 +1301,7 @@ void model_D_write(void * server_addr, size_t length, void * local_addr)
 void model_D_writeImm(void * server_addr, size_t length, void * local_addr)
 {
 	void * globle_addr = server_addr; /*just one server*/
-	dhmp_write_imm2(server_addr, globle_addr, local_addr, length); 
+	// dhmp_write_imm2(server_addr, globle_addr, local_addr, length); 
 }
 
 void model_D_send(void * server_addr, size_t length, void * local_addr)
@@ -1268,9 +1310,10 @@ void model_D_send(void * server_addr, size_t length, void * local_addr)
 	dhmp_send2(server_addr, globle_addr, local_addr, length); 
 }
 
-void model_1_octopus(void * globle_addr, size_t length, void * local_addr)
+void model_1_octopus(void * globle_addr, size_t length, void * local_addr,char flag_write)
 {
 	// amper_octopus(globle_addr, globle_addr, local_addr, length); 
+	dhmp_write_imm2(globle_addr, local_addr, length, flag_write); 
 }
 void model_1_octopus_R(void * globle_addr, size_t length, void * local_addr)
 {
@@ -1415,8 +1458,8 @@ void model_7_scalable( uintptr_t * globle_addr , size_t length, uintptr_t * loca
 		scalable_write[1] = batch;
 		scalable_write[2] = flag_write;
 		scalable_write[3] = 1; // valid
-		INFO_LOG("amper_scale2 size=%d totol=%d offset = %d,dhm=%p local=%p,Creq_mr=%p  Cdata=%p",length,local_length,offset,globle_addr[0] ,
-			local_addr[0],client->scaleRPC.Creq_mr->addr,client->scaleRPC.Cdata_mr->addr);
+		INFO_LOG("amper_scale2 size=%d totol=%d offset = %d,dhm=%p valid =%p ",length,local_length,offset,globle_addr[0] ,
+		 scalable_write+3 - client->scaleRPC.Creq_mr->addr + client->scaleRPC.Sreq_mr.addr + wwork->offset);
 		amper_scalable(offset, local_length , 2 , length, flag_write, batch);
 		// ibv_dereg_mr(local_data_smr->mr);
 		// free(local_data_smr);
@@ -1451,53 +1494,20 @@ void send_UD(uintptr_t * globle_addr , size_t length, uintptr_t * local_addr, ch
 	wwork.done_flag=false;
 	wwork.local_addr = local_addr;
 	wwork.recv_flag=false;
+	wwork.batch = batch;
+	wwork.flag_write = flag_write;
+	wwork.globle_addr = globle_addr;
 
 	work->work_type=AMPER_WORK_UD;
 	work->work_data=&wwork;
 
-	{
-		struct dhmp_UD_work *wwork;
-		struct dhmp_msg msg;
-		struct dhmp_UD_request req_msg;
-	
-		wwork=(struct dhmp_UD_work*)work->work_data;
-		
-		/*build malloc request msg*/
-		req_msg.req_size = wwork->length;
-		req_msg.task = wwork;
-		req_msg.local_addr = wwork->local_addr;
-	
-		size_t local_length = sizeof(struct dhmp_UD_request) + 2 + batch * (sizeof(void*) + sizeof(size_t));
-		if(flag_write == 1)
-			local_length += (batch * length);//(data+remote_addr+size)* batch
-		void * local_data = malloc(local_length);
-		void * temp = local_data; 
-		memcpy(temp, &req_msg , sizeof(struct dhmp_UD_request));
-		temp += sizeof(struct dhmp_UD_request);
-		*(char *) temp = batch;
-		*(char *)(temp+1) = flag_write;
-		temp += 2;
-		for(i = 0; i < batch ;i++)
-		{
-			memcpy(temp , &(globle_addr[i]), sizeof(uintptr_t));
-			memcpy(temp + sizeof(uintptr_t) , &length , sizeof(size_t));
-			temp  = temp + sizeof(uintptr_t) + sizeof(size_t);
-			if(flag_write == 1)
-			{
-				memcpy(temp , (void*)((wwork->local_addr)[i]), length);
-				temp += length;
-			}
-		}
 
-		msg.msg_type=DHMP_MSG_UD_REQUEST;
-		msg.data_size = local_length;
-		msg.data = local_data;
-		amper_ud_post_send(client->connect_trans, &msg);
+	pthread_mutex_lock(&client->mutex_work_list);
+	list_add_tail(&work->work_entry, &client->work_list);
+	pthread_mutex_unlock(&client->mutex_work_list);
 	
-		/*wait for the server return result*/
-		while(wwork->recv_flag==false);
-		free(local_data);
-	}
+	while(!wwork.done_flag);
+
 	free(work);
 out:
 	return ;

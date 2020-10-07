@@ -29,6 +29,21 @@
 
 struct dhmp_server *server=NULL;
 
+struct timespec time_start, time_end;
+unsigned long time_diff_ns,write_time,read_time;
+
+
+static void show( struct timespec* time, char output,unsigned long *result)
+{
+	clock_gettime(CLOCK_MONOTONIC, time);	
+	if(output == 1)
+	{
+		time_diff_ns = ((time_end.tv_sec * 1000000000) + time_end.tv_nsec) -
+                        ((time_start.tv_sec * 1000000000) + time_start.tv_nsec);
+        *result += time_diff_ns;
+  		
+	}
+}
 
 /**
  *	dhmp_get_dev_from_server:get the dev_ptr from dev_list of server.
@@ -171,19 +186,24 @@ void amper_L5_request_handler(int node_id)
 	size_t reply_size= 0;
 	if(write_flag == 1)
 	{
+		show(&time_start,0,&write_time);
 		memcpy(server_addr, context + sizeof(uintptr_t) + sizeof(size_t) + 1, size);
 		_mm_clflush(server_addr);
 		*(char *)temp = 1;
 		temp += 1;
-		reply_size = sizeof(size_t) + 1;
+		reply_size = sizeof(size_t) + 2;
+		show(&time_end,1,&write_time);
 	}
 	else
 	{
+		show(&time_start,0,&read_time);
 		memcpy(temp, server_addr, size);
 		temp += size;
-		reply_size= sizeof(size_t) + size;
+		reply_size= sizeof(size_t) + 1 + size;
+		show(&time_end,1,&read_time);
 	}
-	memcpy(temp, &size, sizeof(size_t));
+	*(char*)temp = 1;
+	memcpy(temp+1, &size, sizeof(size_t));
 
 	struct ibv_send_wr send_wr,*bad_wr=NULL;
 	memset(&send_wr, 0, sizeof(struct ibv_send_wr));
@@ -202,6 +222,8 @@ void amper_L5_request_handler(int node_id)
 	
 	server->L5_message[node_id].is_new = true;
 	free(task);
+	fprintf(stderr,"runtime write = %lf read = %lf ms\n", (double)(write_time)/1000000,(double)(read_time)/1000000);
+  	fflush(stderr);
 	return;
 }
 
@@ -223,34 +245,6 @@ void *L5_run()
 	return;
 }
 
-void *L5_flush2_run(void* arg1)
-{
-	int node_id = *(int*) arg1;
-	uintptr_t now;
-	INFO_LOG("start L5 epoll");
-	int i;
-	while(1)
-	{
-		if(server->L5_message[node_id].addr == NULL) continue;
-		now = *(uintptr_t *)(server->L5_message[node_id].addr);
-		while(server->L5_message[node_id].is_new != true);
-		while(now == 0);
-		INFO_LOG("get new L5 FLUSH2 message");
-		struct dhmp_task* task;
-		task = dhmp_write_task_create(server->connect_trans[node_id], NULL, 0);
-		if (!task )
-		{
-			ERROR_LOG ( "allocate memory error." );
-			return ;
-		}
-		char num_1 = 1;
-		amper_post_write(task, &(server->L5_message[node_id].C_mr), (uint64_t *)&(num_1), sizeof(char), 0, true); 
-		while(!task->done_flag);
-		free(task);
-		server->L5_message[node_id].is_new = false;
-	}
-	return;
-}
 
 static char check_valid(char *data, size_t size)
 {
@@ -259,36 +253,6 @@ static char check_valid(char *data, size_t size)
 		if(data[i] != 0)
 			return 1;
 	return 0;
-}
-
-void *tailwind_flush2_run(void* arg1)
-{
-	int node_id = *(int*) arg1;
-	size_t size = *(size_t*) (arg1 + sizeof(int));
-	INFO_LOG("start tailwind epoll");
-	int i;
-	while(1)
-	{
-		for(i = 1;i < Tailwind_log_size-1;i++)
-		{
-			void * temp = server->Tailwind_buffer[node_id].addr;
-			while( check_valid(temp + i*size , size) == 0);
-
-			INFO_LOG("get new tailwind FLUSH2 message");
-			struct dhmp_task* task;
-			task = dhmp_write_task_create(server->connect_trans[node_id], NULL, 0);
-			if (!task )
-			{
-				ERROR_LOG ( "allocate memory error." );
-				return ;
-			}
-			char num_1 = 1;
-			amper_post_write(task, &(server->Tailwind_buffer[node_id].flush2_mr), (uint64_t*)&(num_1), sizeof(char), 0, true); 
-			while(!task->done_flag);
-			free(task);
-		}
-	}
-	return;
 }
 
 
@@ -332,11 +296,11 @@ void *RFP_run(void* arg1)
 	int node_id = *(int*) arg1;
 	size_t size = server->RFP[node_id].size;
 	server->RFP[node_id].time = 1;
+	char * poll_addr = server->RFP[node_id].write_mr->addr + size + sizeof(uintptr_t) +sizeof(size_t) +1;
 	INFO_LOG("start RFP epoll");
 	while(1)
 	{
 		if(server->RFP[node_id].write_mr == NULL) continue;
-		char * poll_addr = server->RFP[node_id].write_mr->addr + size + sizeof(uintptr_t) +sizeof(size_t) +1;
 		if(*poll_addr != 0)
 		{
 			INFO_LOG("get new RFP message");
@@ -363,24 +327,33 @@ void *FaRM_run(void* arg1)
 	void* local_addr,*server_addr;
 	size_t size =  server->FaRM[node_id].size;
 	size_t buffer_size = sizeof(uintptr_t)*2 + sizeof(size_t) + 2 + size;
+	void* temp = malloc(buffer_size);
+	server->FaRM[node_id].local_mr = dhmp_create_smr_per_ops(server->connect_trans[node_id], temp, buffer_size)->mr;
+
 	reply = server->FaRM[node_id].S_mr->addr + size;
 	valid = reply + (sizeof(uintptr_t)*2 + sizeof(size_t) + 1);
 	while(1)
 	{
+		if(server->FaRM[node_id].size == 0)
+		{
+			ibv_dereg_mr(server->FaRM[node_id].local_mr);
+			break;
+		}
 		if(*valid == 0)
 			continue;
 		*valid = 0;
 		INFO_LOG("get new FaRM messge");
+
+		size_t reply_size = 1;
+		temp = server->FaRM[node_id].local_mr->addr;
+		*(char*)temp = 1;
+#if((!defined WFLUSH) && (!defined RFLUSH))
+		reply_size; = sizeof(uintptr_t)*2 + sizeof(size_t) + 2;
+		if(write_flag == 0)
+			reply_size += size;
 		server_addr = (void*)*(uintptr_t*)reply;
 		local_addr = (void*)*(uintptr_t*)(reply + sizeof(uintptr_t));
 		write_flag = *(reply + sizeof(uintptr_t)*2 + sizeof(size_t));
-
-		size_t reply_size = sizeof(uintptr_t)*2 + sizeof(size_t) + 2;
-		if(write_flag == 0)
-			reply_size += size;
-		
-		void *temp = malloc(reply_size);
-		struct dhmp_send_mr*  local_smr = dhmp_create_smr_per_ops(server->connect_trans[node_id], temp, reply_size);
 		
 		if(write_flag == 1)
 		{
@@ -398,7 +371,7 @@ void *FaRM_run(void* arg1)
 		*(size_t*)(temp + sizeof(uintptr_t)*2) = size;
 		*(char*)(temp + sizeof(uintptr_t)*2 + sizeof(size_t)) = write_flag;
 		*(char*)(temp + sizeof(uintptr_t)*2 + sizeof(size_t) + 1) = 1; //valid
-
+#endif
 		struct dhmp_task* task;
 		task = dhmp_write_task_create(server->connect_trans[node_id], NULL, 0);
 		if (!task )
@@ -416,12 +389,14 @@ void *FaRM_run(void* arg1)
 		send_wr.num_sge=1;
 		send_wr.send_flags=IBV_SEND_SIGNALED;
 		send_wr.wr.rdma.remote_addr= ( uintptr_t ) server->FaRM[node_id].C_mr.addr + (i * buffer_size);
+#if((!defined WFLUSH) && (!defined RFLUSH))
 		if(write_flag == 1)
 			send_wr.wr.rdma.remote_addr += size;
+#endif
 		send_wr.wr.rdma.rkey= server->FaRM[node_id].C_mr.rkey;
-		sge.addr= ( uintptr_t )local_smr->mr->addr;
+		sge.addr= ( uintptr_t )server->FaRM[node_id].local_mr->addr;
 		sge.length= reply_size;
-		sge.lkey= local_smr->mr->lkey;
+		sge.lkey= server->FaRM[node_id].local_mr->lkey;
 		int err=ibv_post_send ( task->rdma_trans->qp, &send_wr, &bad_wr );
 		if ( err )
 		{
@@ -431,16 +406,12 @@ void *FaRM_run(void* arg1)
 		}	
 		while(!task->done_flag);
 		free(task);
-		ibv_dereg_mr(local_smr->mr);
-		free(local_smr);
-
+#if((defined WFLUSH) || (defined RFLUSH))
 		i = (i + 1) % FaRM_buffer_NUM;
+#endif
 		reply = server->FaRM[node_id].S_mr->addr + size + (i * buffer_size);
 		valid = reply + (sizeof(uintptr_t)*2 + sizeof(size_t) + 1);
-		if(server->FaRM[node_id].size == 0)
-		{
-			break;
-		}
+		
 	}
 
 	return;
@@ -673,7 +644,7 @@ void amper_scalable_request_handler(int node_id, char batch, char write_type, ch
 		{
 			ERROR_LOG("ibv_post_send error");
 			exit(-1);
-			return -1;
+			return;
 		}	
 	}
 	while(!scalable_task2->done_flag);
@@ -692,16 +663,18 @@ void *scalable_run(void* arg1)
 	int i = 0;
 	while(1)
 	{
+		if(server->scaleRPC[node_id].Slocal_mr == NULL)
+			break;
 		if(*(char *)(server->scaleRPC[node_id].Sreq_mr->addr + head_size +3))
 		{
 			addr = server->scaleRPC[node_id].Sreq_mr->addr + head_size;
+			addr[3] = 0;
 			INFO_LOG("get new scaleRPC type = %d message %d %d ", addr[0],addr[1],addr[2]);
 			amper_scalable_request_handler(node_id, batch, *(addr), *(addr+2), size); 
-			addr[3] = 0;
-			INFO_LOG("start scaleRPC %p epoll", server->scaleRPC[node_id].Sreq_mr->addr);
+			
+			INFO_LOG("start scaleRPC %p epoll", server->scaleRPC[node_id].Sreq_mr->addr+ head_size +3);
 		}
-		if(server->scaleRPC[node_id].Slocal_mr == NULL)
-			break;
+		
 	}
 	return ;
 }
@@ -843,12 +816,8 @@ void amper_allocspace_for_server(struct dhmp_transport* rdma_trans, int is_speci
 			temp_smr = dhmp_create_smr_per_ops(rdma_trans, server->L5_message[node_id].addr, size+18);
 			server->L5_message[node_id].mr = temp_smr->mr;
 			INFO_LOG("L5 buffer %d %p is ready.",node_id,server->L5_mailbox.mr->addr);
-			void * temp = malloc(size + sizeof(size_t));
-			server->L5_message[node_id].reply_smr = dhmp_create_smr_per_ops(rdma_trans, temp , size + sizeof(size_t));
-#ifdef FLUSH2
-			server->L5_message[node_id].is_new = true;
-			pthread_create(&server->L5_flush2_poll_thread[node_id], NULL, L5_flush2_run, &node_id);
-#endif
+			void * temp = malloc(size + sizeof(size_t) + 1) ;
+			server->L5_message[node_id].reply_smr = dhmp_create_smr_per_ops(rdma_trans, temp , size + sizeof(size_t) + 1);
 		}
 		break;
 		case 4: // for tailwind
@@ -911,7 +880,7 @@ void amper_allocspace_for_server(struct dhmp_transport* rdma_trans, int is_speci
 		break;
 		case 8: // for FaRM
 		{
-			size_t totol_length = 1 + 1 + sizeof(uintptr_t)*2 + sizeof(size_t) + size; // batch + writeORread + readmr  
+			size_t totol_length = 2 + sizeof(uintptr_t)*2 + sizeof(size_t) + size; // batch + writeORread + readmr  
 			temp = nvm_malloc(totol_length * FaRM_buffer_NUM); 
 			temp_smr = dhmp_create_smr_per_ops(rdma_trans, temp, totol_length * FaRM_buffer_NUM);
 			server->FaRM[node_id].S_mr = temp_smr->mr;
@@ -929,14 +898,15 @@ void amper_allocspace_for_server(struct dhmp_transport* rdma_trans, int is_speci
 			pthread_create(&(server->herd[node_id].poll_thread), NULL, herd_run, &node_id);
 		}
 		break;
-		case 10: // for pRDMA
+		case 10: // for octo
 		{
-			size_t totol_length = 1 + 1 + sizeof(uintptr_t)*2 + sizeof(size_t) + size; // batch + writeORread + readmr  
-			temp = nvm_malloc(totol_length * FaRM_buffer_NUM); 
-			temp_smr = dhmp_create_smr_per_ops(rdma_trans, temp, totol_length * FaRM_buffer_NUM);
-			server->pRDMA[node_id].S_mr = temp_smr->mr;
-			server->pRDMA[node_id].size = size;
-			pthread_create(&(server->pRDMA[node_id].poll_thread), NULL, pRDMA_run, &node_id);
+			size_t totol_length =  sizeof(struct dhmp_octo_request) + size; // batch + writeORread + readmr  
+			temp = nvm_malloc(totol_length); 
+			temp_smr = dhmp_create_smr_per_ops(rdma_trans, temp, totol_length );
+			server->octo[node_id].S_mr = temp_smr->mr;
+			temp = nvm_malloc(totol_length); 
+			server->octo[node_id].local_mr = dhmp_create_smr_per_ops(rdma_trans, temp, totol_length )->mr;
+
 		}
 		break;
 	};

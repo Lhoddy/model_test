@@ -97,17 +97,18 @@ int main(int argc,char *argv[])
 #ifdef octopus
 	for(i=0;i<objnum;i++)
 		addr[i]=dhmp_malloc(size+8,0); // 8 = point space for c&s
+	dhmp_malloc(size,10); //for octo
 	show("start count",&task_time_start);
 	// dhmp_malloc(size,8); //似乎做不了
 	for(j=0;j<(accessnum /100 )* write_part ;j++)
 	{ 
 		i = j%objnum;
-		model_1_octopus(addr[rand_num[i]], size, str);
+		model_1_octopus(addr[rand_num[i]], size, str,1);
 	}
 	for(;j<accessnum;j++)
 	{ 
 		i = j%objnum;
-		model_1_octopus_R(addr[rand_num[i]], size, str);
+		model_1_octopus_R(addr[rand_num[i]], size, str,0);
 	}
 
 	show("over count",&task_time_end);
@@ -285,8 +286,12 @@ int main(int argc,char *argv[])
 			temp[k] = (uintptr_t)addr[rand_num[(i+k)%objnum]];
 		send_UD(temp, size, &local_addr , 0 , batch); //用的默认的send recv queue
 	}
-
+check_request(3);
 	show("over count",&task_time_end);
+	task_time_diff_ns = ((task_time_end.tv_sec * 1000000000) + task_time_end.tv_nsec) -
+                        ((task_time_start.tv_sec * 1000000000) + task_time_start.tv_nsec);
+  	fprintf(stderr,"%lf\n",size, write_part, (double)task_time_diff_ns/1000000);
+	fflush(stderr);
 	for(i=0;i<objnum;i++)	
 		dhmp_free(addr[i]);
 #endif
@@ -312,32 +317,11 @@ int main(int argc,char *argv[])
 	for(i=0;i<objnum;i++)	
 		dhmp_free(addr[i]);
 #endif
-#ifdef pRDMA
-	for(i=0;i<objnum;i++)
-		addr[i]=dhmp_malloc(size,0);
-	dhmp_malloc(size,10); //for pRDMA
-
-	show("start count",&task_time_start);
-	for(j=0;j<(accessnum /100 )* write_part;j++)
-	{ 
-		i = j%objnum;
-		amper_pRDMA_write_senderactive(str, size, addr[rand_num[i]], 1); //1 for write
-	}
-	for(;j<accessnum;j++)
-	{ 
-		i = j%objnum;
-		amper_pRDMA_write_senderactive(str, size, addr[rand_num[i]], 0); //1 for write
-	}
-	show("over count",&task_time_end);
-	check_request(2);
-	for(i=0;i<objnum;i++)	
-		dhmp_free(addr[i]);
-#endif
 	
 	task_time_diff_ns = ((task_time_end.tv_sec * 1000000000) + task_time_end.tv_nsec) -
                         ((task_time_start.tv_sec * 1000000000) + task_time_start.tv_nsec);
-  	printf("%d %d runtime %lf ms\n",size, write_part, (double)task_time_diff_ns/1000000);
-
+  	fprintf(stderr,"%lf\n",size, write_part, (double)task_time_diff_ns/1000000);
+	fflush(stderr);
 	dhmp_client_destroy();
 
 	
