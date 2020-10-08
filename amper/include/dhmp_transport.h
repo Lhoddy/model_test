@@ -118,5 +118,8 @@ void amper_UD_response_handler(struct dhmp_transport* rdma_trans, struct dhmp_ms
 
 void amper_herd_response_handler(struct dhmp_transport* rdma_trans, struct dhmp_msg* msg);
 void amper_pRDMA_WS_response_handler(struct dhmp_transport* rdma_trans, struct dhmp_msg* msg);
+
+void dhmp_octo_request_handler(struct dhmp_transport* rdma_trans);
+void dhmp_octo_response_handler(struct dhmp_transport* rdma_trans);
 #endif
 

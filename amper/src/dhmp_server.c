@@ -348,13 +348,13 @@ void *FaRM_run(void* arg1)
 		temp = server->FaRM[node_id].local_mr->addr;
 		*(char*)temp = 1;
 #if((!defined WFLUSH) && (!defined RFLUSH))
-		reply_size; = sizeof(uintptr_t)*2 + sizeof(size_t) + 2;
-		if(write_flag == 0)
-			reply_size += size;
 		server_addr = (void*)*(uintptr_t*)reply;
 		local_addr = (void*)*(uintptr_t*)(reply + sizeof(uintptr_t));
 		write_flag = *(reply + sizeof(uintptr_t)*2 + sizeof(size_t));
-		
+		reply_size = sizeof(uintptr_t)*2 + sizeof(size_t) + 2;
+		if(write_flag == 0)
+			reply_size += size;
+
 		if(write_flag == 1)
 		{
 			memcpy(server_addr, server->FaRM[node_id].S_mr->addr + i * buffer_size, size);
@@ -557,10 +557,6 @@ void amper_scalable_request_handler(int node_id, char batch, char write_type, ch
 		temp2 += (batch * size);
 		offset += (batch * size);
 	}
-	else
-	{
-		addr += (batch * size);
-	}
 	if(write_type == 1)
 	{
 		struct dhmp_task* scalable_task;
@@ -597,6 +593,10 @@ void amper_scalable_request_handler(int node_id, char batch, char write_type, ch
 	}
 	else
 	{
+		if(write_flag == 0)
+		{
+			addr += (batch * size);
+		}
 		for(i =0;i<batch;i++)
 		{
 			server_addr = (void*)*(uintptr_t *)addr;

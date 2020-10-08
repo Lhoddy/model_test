@@ -27,8 +27,9 @@
 #define NUM_octo_req ((uint32_t)-4)
 #define NUM_octo_res ((uint32_t)-5)
 
-//#define FLUSH1 FLUSH1
-// #define FLUSH2 FLUSH2
+// #define clover clover
+
+// #define Tailwind Tailwind
 
 #define DHMP_CLIENT_NODE_NUM 3
 
@@ -38,33 +39,47 @@
 #define DaRPC_clust_NUM  5
 #define BATCH 1
 #define Tailwind_log_size 100
-#define FaRM_buffer_NUM 5 //both for herd
 
-// #define UD UD
-#define pRDMA pRDMA
+//#define DaRPC_SERVER DaRPC_SERVER
+
 
 //single
 //#define octopus octopus
 
-// #define clover clover
-
-// #define Tailwind Tailwind
-
 //both
 
 //#define L5 L5
-
-//#define FaRM FaRM
 
 // #define RFP RFP
 
 // #define FaSST FaSST
 // #define UD UD
 
-// #define DaRPC DaRPC
-//#define DaRPC_SERVER DaRPC_SERVER
+//#define scaleRPC scaleRPC
 
- //#define scaleRPC scaleRPC
+// #define DaRPC DaRPC
+
+// #define DaRPC DaRPC
+//#define SFLUSH SFLUSH
+// #define FaRM_buffer_NUM 4 
+
+// #define DaRPC DaRPC
+//#define RFLUSH RFLUSH
+// #define FaRM_buffer_NUM 1 
+
+//#define FaRM FaRM
+
+//#define FaRM FaRM
+//#define WFLUSH WFLUSH
+// #define FaRM_buffer_NUM 4 
+
+//#define FaRM FaRM
+//#define RFLUSH RFLUSH
+// #define FaRM_buffer_NUM 1 
+
+
+
+
 #define Sca1e_Swith_Time 100
 
 
@@ -331,7 +346,7 @@ void dhmp_free(void *dhmp_addr);
 /**
  *	dhmp_client_init:init the dhmp client
  */
-void dhmp_client_init(size_t size, int obj_num);
+void dhmp_client_init(size_t size, int obj_num,int writepart);
 
 /**
  *	dhmp_client_destroy:clean RDMA resources
@@ -365,8 +380,7 @@ void model_D_write(void * server_addr, size_t length, void * local_addr);
 void model_D_writeImm(void * server_addr, size_t length, void * local_addr);
 void model_D_send(void * server_addr, size_t length, void * local_addr);
 
-void  model_1_octopus(void * globle_addr, size_t length, void * local_addr,char flag_write)
-void model_1_octopus_R(void * globle_addr, size_t length, void * local_addr);
+void  model_1_octopus(void * globle_addr, size_t length, void * local_addr,char flag_write);
 void model_1_clover(void * space_addr, size_t length, void * local_addr, uintptr_t* point_addr,int offset);
 void model_1_clover_R(size_t length, void * local_addr, void* dhmp_addr);
 void model_4_RFP( size_t length, void * local_addr, uintptr_t globle_addr, char flag_write);

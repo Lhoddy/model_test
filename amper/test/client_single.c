@@ -1,7 +1,7 @@
 #include <stdio.h>
 
 #include "dhmp.h"
-#define  obj_num_max  1005
+#define  obj_num_max  50005
 
 // #define octopus 
 // #define clover  
@@ -16,12 +16,13 @@ const double C = 1.0;
 
 double pf[obj_num_max]; 
 int rand_num[obj_num_max]={0};
-
-void show(const char * str, struct timespec* time)
+struct timespec task_time_start, task_time_end;
+	unsigned long task_time_diff_ns;
+void show(struct timespec* time, int output)
 {
-	fprintf(stderr,str);	
-	fflush(stderr);
-	clock_gettime(CLOCK_MONOTONIC, time);	
+	return ;
+
+	
 }
 
 void generate()
@@ -65,8 +66,6 @@ int main(int argc,char *argv[])
 	int i,j,size,rnum;
 	char *str;
 	int objnum,accessnum, write_part;
-	struct timespec task_time_start, task_time_end;
-	unsigned long task_time_diff_ns;
 	char batch;
 	uintptr_t local_addr;
 	
@@ -79,8 +78,8 @@ int main(int argc,char *argv[])
 	else
 	{
 		size=atoi(argv[1]);
-		objnum=1000;//atoi(argv[2]);
-		accessnum = 3000;//atoi(argv[3]);
+		objnum=50000;//atoi(argv[2]);
+		accessnum = 300000;//atoi(argv[3]);
 		write_part = atoi(argv[2]);
 	}
 	pick();
@@ -92,14 +91,13 @@ int main(int argc,char *argv[])
 	memset(str, 0 , size+8);
 	snprintf(str, size, "hello world hello");
 	
-	dhmp_client_init(size,objnum,write_part);
+	dhmp_client_init(size,objnum);
 
 #ifdef octopus
 	for(i=0;i<objnum;i++)
-		addr[i]=dhmp_malloc(size+8,0); // 8 = point space for c&s
+		addr[i]=dhmp_malloc(size,0); // 8 = point space for c&s
 	dhmp_malloc(size,10); //for octo
-	show("start count",&task_time_start);
-	// dhmp_malloc(size,8); //似乎做不了
+	show(&task_time_start,0);
 	for(j=0;j<(accessnum /100 )* write_part ;j++)
 	{ 
 		i = j%objnum;
@@ -108,10 +106,10 @@ int main(int argc,char *argv[])
 	for(;j<accessnum;j++)
 	{ 
 		i = j%objnum;
-		model_1_octopus_R(addr[rand_num[i]], size, str,0);
+		model_1_octopus(addr[rand_num[i]], size, str,0);
 	}
 
-	show("over count",&task_time_end);
+	show(&task_time_end,1);
 
 	for(i=0;i<objnum;i++)	
 		dhmp_free(addr[i]);
@@ -121,7 +119,7 @@ int main(int argc,char *argv[])
 		addr[i]=dhmp_malloc(size,0);
 	dhmp_malloc(size,3); //for L5
 
-	show("start count",&task_time_start);
+	
 
 	for(j=0;j<(accessnum /100 )* write_part;j++)
 	{ 
@@ -135,7 +133,7 @@ int main(int argc,char *argv[])
 	}
 	// model_5_L5(size, str, addr[rand_num[i]], 0); //0 for read
 
-	show("over count",&task_time_end);
+	
 
 	for(i=0;i<objnum;i++)	
 		dhmp_free(addr[i]);
@@ -145,7 +143,6 @@ int main(int argc,char *argv[])
 		addr[i]=dhmp_malloc(size,0);
 	dhmp_malloc(size,8); //for FaRM
 
-	show("start count",&task_time_start);
 
 	for(j=0;j<(accessnum /100 )* write_part;j++)
 	{ 
@@ -157,7 +154,7 @@ int main(int argc,char *argv[])
 		i = j%objnum;
 		model_FaRM(str, size, addr[rand_num[i]], 0); //1 for write
 	}
-	show("over count",&task_time_end);
+	show(&task_time_end,1);
 
 	check_request(1);
 	for(i=0;i<objnum;i++)	
@@ -168,7 +165,7 @@ int main(int argc,char *argv[])
 		addr[i]=dhmp_malloc(size,0);
 	dhmp_malloc(size,6); //RFP
 
-	show("start count",&task_time_start);
+	show(&task_time_start,0);
 
 	for(j=0;j<(accessnum /100 )* write_part;j++)
 	{ 
@@ -181,7 +178,7 @@ int main(int argc,char *argv[])
 		model_4_RFP(size, str, addr[rand_num[i]], 0); //1 for write
 	}
 
-	show("over count",&task_time_end);
+	show(&task_time_end,1);
 
 	for(i=0;i<objnum;i++)	
 		dhmp_free(addr[i]);
@@ -193,7 +190,7 @@ int main(int argc,char *argv[])
 	dhmp_malloc(size,7); //scaleRPC
 	uintptr_t remote_addr;
 	local_addr = (uintptr_t)str;
-	show("start count",&task_time_start);
+	show(&task_time_start,0);
 	for(j=0;j<(accessnum /100 )* write_part;j=j+batch)
 	{ 
 		i = j%objnum;
@@ -206,7 +203,7 @@ int main(int argc,char *argv[])
 		remote_addr = (uintptr_t)addr[rand_num[i]];
 		model_7_scalable(&remote_addr, size, &local_addr, 0 , batch);
 	}
-	show("over count",&task_time_end);
+	show(&task_time_end,1);
 	for(i=0;i<objnum;i++)	
 		dhmp_free(addr[i]);
 #endif
@@ -219,7 +216,7 @@ int main(int argc,char *argv[])
 	int k;
 	uintptr_t* temp = malloc(batch*sizeof(uintptr_t));
 	local_addr = (uintptr_t)str;
-	show("start count",&task_time_start);
+	show(&task_time_start,0);
 	for(j=0;j<(accessnum /100 )* write_part;j=j+batch)
 	{ 
 		i = j%objnum;
@@ -235,7 +232,7 @@ int main(int argc,char *argv[])
 		model_3_DaRPC(temp, size, &local_addr, 0 , batch); //用的默认的send recv queue
 	}
 
-	show("over count",&task_time_end);
+	show(&task_time_end,1);
 	for(i=0;i<objnum;i++)	
 		dhmp_free(addr[i]);
 #endif
@@ -247,7 +244,7 @@ int main(int argc,char *argv[])
 	int k;
 	uintptr_t* temp = malloc(batch*sizeof(uintptr_t));
 	local_addr = (uintptr_t)str;
-	show("start count",&task_time_start);
+	show(&task_time_start,0);
 	for(j=0;j<(accessnum /100 )* write_part;j=j+batch)
 	{ 
 		i = j%objnum;
@@ -262,12 +259,8 @@ int main(int argc,char *argv[])
 			temp[k] = (uintptr_t)addr[rand_num[(i+k)%objnum]];
 		send_UD(temp, size, &local_addr , 0 , batch); //用的默认的send recv queue
 	}
-	check_request(3);
-	show("over count",&task_time_end);
-	task_time_diff_ns = ((task_time_end.tv_sec * 1000000000) + task_time_end.tv_nsec) -
-                        ((task_time_start.tv_sec * 1000000000) + task_time_start.tv_nsec);
-  	fprintf(stderr,"%lf\n",size, write_part, (double)task_time_diff_ns/1000000);
-	fflush(stderr);
+check_request(3);
+	show(&task_time_end,1);
 	for(i=0;i<objnum;i++)	
 		dhmp_free(addr[i]);
 #endif
@@ -277,7 +270,7 @@ int main(int argc,char *argv[])
 		addr[i]=dhmp_malloc(size,0);
 	dhmp_malloc(size,9); //for Herd
 
-	show("start count",&task_time_start);
+	show(&task_time_start,0);
 
 	for(j=0;j<(accessnum /100 )* write_part;j++)
 	{ 
@@ -289,15 +282,12 @@ int main(int argc,char *argv[])
 		i = j%objnum;
 		model_herd(str, size, addr[rand_num[i]], 0); //1 for write
 	}
-	show("over count",&task_time_end);
+	show(&task_time_end,1);
 	for(i=0;i<objnum;i++)	
 		dhmp_free(addr[i]);
 #endif
 	
-	task_time_diff_ns = ((task_time_end.tv_sec * 1000000000) + task_time_end.tv_nsec) -
-                        ((task_time_start.tv_sec * 1000000000) + task_time_start.tv_nsec);
-  	fprintf(stderr,"%lf\n",size, write_part, (double)task_time_diff_ns/1000000);
-	fflush(stderr);
+	
 	dhmp_client_destroy();
 
 	

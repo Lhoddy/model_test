@@ -28,6 +28,7 @@ struct dhmp_client{
 	int fifo_node_index;
 
 	pthread_t work_thread;
+	
 	pthread_mutex_t mutex_work_list;
 	struct list_head work_list;
 
@@ -128,7 +129,10 @@ struct dhmp_client{
 		struct ibv_mr* read_mr;
 	}pRDMA;
 	
-	
+	struct{
+		pthread_t stress_thread;
+		int stop;
+	}stress;
 };
 
 extern struct dhmp_client *client;

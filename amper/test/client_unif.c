@@ -3,19 +3,6 @@
 #include "dhmp.h"
 #define  obj_num_max  1005
 
-// #define octopus 
-// #define clover  
-// #define L5  
-// #define Tailwind  
-// #define DaRPC   
-// #define scaleRPC
-// #define RFP   
-
-const double A = 1.3;  
-const double C = 1.0;  
-
-double pf[obj_num_max]; 
-int rand_num[obj_num_max]={0};
 
 void show(const char * str, struct timespec* time)
 {
@@ -24,38 +11,6 @@ void show(const char * str, struct timespec* time)
 	clock_gettime(CLOCK_MONOTONIC, time);	
 }
 
-void generate()
-{
-    int i;
-    double sum = 0.0;
- 
-    for (i = 0; i < obj_num_max; i++)
-        sum += C/pow((double)(i+2), A);
-
-    for (i = 0; i < obj_num_max; i++)
-    {
-        if (i == 0)
-            pf[i] = C/pow((double)(i+2), A)/sum;
-        else
-            pf[i] = pf[i-1] + C/pow((double)(i+2), A)/sum;
-    }
-}
-void pick()
-{
-	int i, index;
-
-    generate();
-
-    srand(time(0));
-    for ( i= 0; i < obj_num_max; i++)
-    {
-        index = 0;
-        double data = (double)rand()/RAND_MAX; 
-        while (index<(obj_num_max-6)&&data > pf[index])   
-            index++;
-		rand_num[i]=index;
-    }
-}
 
 int main(int argc,char *argv[])
 {
@@ -103,12 +58,12 @@ int main(int argc,char *argv[])
 	for(j=0;j<(accessnum /100 )* write_part ;j++)
 	{ 
 		i = j%objnum;
-		model_1_octopus(addr[rand_num[i]], size, str,1);
+		model_1_octopus(addr[i], size, str,1);
 	}
 	for(;j<accessnum;j++)
 	{ 
 		i = j%objnum;
-		model_1_octopus_R(addr[rand_num[i]], size, str,0);
+		model_1_octopus_R(addr[i], size, str,0);
 	}
 
 	show("over count",&task_time_end);
@@ -126,14 +81,14 @@ int main(int argc,char *argv[])
 	for(j=0;j<(accessnum /100 )* write_part;j++)
 	{ 
 		i = j%objnum;
-		model_5_L5(size, str, addr[rand_num[i]], 1); //1 for write
+		model_5_L5(size, str, addr[i], 1); //1 for write
 	}
 	for(;j<accessnum;j++)
 	{ 
 		i = j%objnum;
-		model_5_L5(size, str, addr[rand_num[i]], 0); //1 for write
+		model_5_L5(size, str, addr[i], 0); //1 for write
 	}
-	// model_5_L5(size, str, addr[rand_num[i]], 0); //0 for read
+	// model_5_L5(size, str, addr[i], 0); //0 for read
 
 	show("over count",&task_time_end);
 
@@ -150,12 +105,12 @@ int main(int argc,char *argv[])
 	for(j=0;j<(accessnum /100 )* write_part;j++)
 	{ 
 		i = j%objnum;
-		model_FaRM(str, size, addr[rand_num[i]], 1); //1 for write
+		model_FaRM(str, size, addr[i], 1); //1 for write
 	}
 	for(;j<accessnum;j++)
 	{ 
 		i = j%objnum;
-		model_FaRM(str, size, addr[rand_num[i]], 0); //1 for write
+		model_FaRM(str, size, addr[i], 0); //1 for write
 	}
 	show("over count",&task_time_end);
 
@@ -173,12 +128,12 @@ int main(int argc,char *argv[])
 	for(j=0;j<(accessnum /100 )* write_part;j++)
 	{ 
 		i = j%objnum;
-		model_4_RFP(size, str, addr[rand_num[i]], 1); //1 for write
+		model_4_RFP(size, str, addr[i], 1); //1 for write
 	}
 	for(;j<accessnum;j++)
 	{ 
 		i = j%objnum;
-		model_4_RFP(size, str, addr[rand_num[i]], 0); //1 for write
+		model_4_RFP(size, str, addr[i], 0); //1 for write
 	}
 
 	show("over count",&task_time_end);
@@ -197,13 +152,13 @@ int main(int argc,char *argv[])
 	for(j=0;j<(accessnum /100 )* write_part;j=j+batch)
 	{ 
 		i = j%objnum;
-		remote_addr = (uintptr_t)addr[rand_num[i]];
+		remote_addr = (uintptr_t)addr[i];
 		model_7_scalable(&remote_addr, size, &local_addr, 1 , batch);
 	}
 	for(;j<accessnum;j=j+batch)
 	{ 
 		i = j%objnum;
-		remote_addr = (uintptr_t)addr[rand_num[i]];
+		remote_addr = (uintptr_t)addr[i];
 		model_7_scalable(&remote_addr, size, &local_addr, 0 , batch);
 	}
 	show("over count",&task_time_end);
@@ -224,14 +179,14 @@ int main(int argc,char *argv[])
 	{ 
 		i = j%objnum;
 		for(k = 0;k<batch;k++)
-			temp[k] = (uintptr_t)(addr[rand_num[(i+k)%objnum]]);
+			temp[k] = (uintptr_t)(addr[(i+k)%objnum]);
 		model_3_DaRPC(temp, size, &local_addr, 1 , batch);//用的默认的send recv queue
 	}
 	for(;j<accessnum;j=j+batch)
 	{ 
 		i = j%objnum;
 		for(k = 0;k<batch;k++)
-			temp[k] = (uintptr_t)(addr[rand_num[(i+k)%objnum]]);
+			temp[k] = (uintptr_t)(addr[(i+k)%objnum]);
 		model_3_DaRPC(temp, size, &local_addr, 0 , batch); //用的默认的send recv queue
 	}
 
@@ -252,17 +207,17 @@ int main(int argc,char *argv[])
 	{ 
 		i = j%objnum;
 		for(k = 0;k<batch;k++)
-			temp[k] = (uintptr_t)addr[rand_num[(i+k)%objnum]];
+			temp[k] = (uintptr_t)addr[(i+k)%objnum];
 		send_UD(temp, size, &local_addr, 1 , batch);//用的默认的send recv queue
 	}
 	for(;j<accessnum;j=j+batch)
 	{ 
 		i = j%objnum;
 		for(k = 0;k<batch;k++)
-			temp[k] = (uintptr_t)addr[rand_num[(i+k)%objnum]];
+			temp[k] = (uintptr_t)addr[(i+k)%objnum];
 		send_UD(temp, size, &local_addr , 0 , batch); //用的默认的send recv queue
 	}
-	check_request(3);
+check_request(3);
 	show("over count",&task_time_end);
 	task_time_diff_ns = ((task_time_end.tv_sec * 1000000000) + task_time_end.tv_nsec) -
                         ((task_time_start.tv_sec * 1000000000) + task_time_start.tv_nsec);
@@ -282,12 +237,12 @@ int main(int argc,char *argv[])
 	for(j=0;j<(accessnum /100 )* write_part;j++)
 	{ 
 		i = j%objnum;
-		model_herd(str, size, addr[rand_num[i]], 1); //1 for write
+		model_herd(str, size, addr[i], 1); //1 for write
 	}
 	for(;j<accessnum;j++)
 	{ 
 		i = j%objnum;
-		model_herd(str, size, addr[rand_num[i]], 0); //1 for write
+		model_herd(str, size, addr[i], 0); //1 for write
 	}
 	show("over count",&task_time_end);
 	for(i=0;i<objnum;i++)	

@@ -1744,10 +1744,6 @@ error:
 	return -1;
 }
 
-int getFreeList()
-{
-	return 0;
-}
 
 void dhmp_ReqAddr1_request_handler(struct dhmp_transport* rdma_trans, struct dhmp_msg* msg)
 {
@@ -1755,19 +1751,10 @@ void dhmp_ReqAddr1_request_handler(struct dhmp_transport* rdma_trans, struct dhm
 	struct dhmp_msg res_msg;
 
 	memcpy ( &response.req_info, msg->data, sizeof(struct dhmp_ReqAddr1_request));
-	INFO_LOG ( "client ReqAddr1 size %d",response.req_info.req_size);
 
 	res_msg.msg_type=DHMP_MSG_REQADDR1_RESPONSE;
 	res_msg.data_size=sizeof(struct dhmp_ReqAddr1_response);
 	res_msg.data=&response;
-
-	int index = getFreeList();
-	server->tasklist[index].dhmp_addr = response.req_info.dhmp_addr;
-	server->tasklist[index].rdma_trans = rdma_trans;
-	server->tasklist[index].length = response.req_info.req_size;
-	server->tasklist[index].cmpflag = response.req_info.cmpflag;
-
-	response.task_offset = index;
 
 	dhmp_post_send(rdma_trans, &res_msg);
 	return ;
@@ -1776,14 +1763,9 @@ void dhmp_ReqAddr1_request_handler(struct dhmp_transport* rdma_trans, struct dhm
 void dhmp_ReqAddr1_response_handler(struct dhmp_transport* rdma_trans, struct dhmp_msg* msg)
 {
 	struct dhmp_ReqAddr1_response * response_msg;
-	/*memcpy(&response_msg, msg->data, sizeof(struct dhmp_ReqAddr1_response));*/
 	response_msg = msg->data;
 	struct reqAddr_work * work = response_msg->req_info.task;
-
-	work->dhmp_addr = response_msg->req_info.dhmp_addr;  /*main des*/
-	work->length = response_msg->task_offset;
 	work->recv_flag = true;
-	/*DEBUG_LOG("response ReqAddr1 addr %p ",response_msg.req_info.dhmp_addr); */
 }
 
 
@@ -2475,7 +2457,7 @@ void dhmp_octo_request_handler(struct dhmp_transport* rdma_trans)
 	if(!write_task)
 	{
 		ERROR_LOG("allocate memory error.");
-		return -1;
+		return ;
 	}
 
 	struct ibv_send_wr send_wr,*bad_wr=NULL;
@@ -2486,13 +2468,13 @@ void dhmp_octo_request_handler(struct dhmp_transport* rdma_trans)
 	send_wr.sg_list=&sge;
 	send_wr.num_sge=1;
 	send_wr.send_flags=IBV_SEND_SIGNALED;
-	send_wr.wr.rdma.remote_addr= ( uintptr_t ) server->octo[rdma_trans->node_id].C_mr->addr;
-	send_wr.wr.rdma.rkey= server->octo[rdma_trans->node_id].C_mr->rkey;
+	send_wr.wr.rdma.remote_addr= ( uintptr_t ) server->octo[rdma_trans->node_id].C_mr.addr;
+	send_wr.wr.rdma.rkey= server->octo[rdma_trans->node_id].C_mr.rkey;
 	send_wr.imm_data = NUM_octo_res;
 	sge.addr= ( uintptr_t ) server->octo[rdma_trans->node_id].local_mr->addr;
 	sge.length= reply_size;
 	sge.lkey= server->octo[rdma_trans->node_id].local_mr->lkey;
-	ibv_post_send ( wwork->rdma_trans->qp, &send_wr, &bad_wr );
+	ibv_post_send (rdma_trans->qp, &send_wr, &bad_wr );
 	while(!write_task->done_flag);
 	return ;
 }

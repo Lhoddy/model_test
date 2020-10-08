@@ -59,13 +59,6 @@ struct dhmp_server{
 
 	int client_num;
 
-	struct{
-		struct ibv_mr C_mr;
-		void * new_addr;
-		void * new_addr1;
-		pthread_t poll_thread;
-	}octo[DHMP_CLIENT_NODE_NUM];
-
 	struct  {
 		struct ibv_mr* mr;
 		void * addr;

@@ -13,8 +13,7 @@
 struct timespec time_start, time_end;
 unsigned long time_diff_ns,write_time,read_time;
 
-show(&time_start,0,&write_time);
-show(&time_end, 1, &write_time);
+
 static void show( struct timespec* time, char output, unsigned long *result)
 {
 	clock_gettime(CLOCK_MONOTONIC, time);	
@@ -400,7 +399,6 @@ int amper_scalable_work_handler(struct dhmp_work *work)
 		ERROR_LOG("allocate memory error.");
 		return -1;
 	}
-	// while(1)
 	{
 		struct ibv_send_wr send_wr,*bad_wr=NULL;
 		struct ibv_sge sge;
@@ -423,10 +421,6 @@ int amper_scalable_work_handler(struct dhmp_work *work)
 			exit(-1);
 			return -1;
 		}	
-		// while(!scalable_task->done_flag);
-  //       if(*(char *)(client->scaleRPC.Cdata_mr->addr + wwork->batch * (sizeof(uintptr_t)*2 + sizeof(size_t) + wwork->size)) != 0)
-  //               break;
-  //       scalable_task->done_flag = false;
 
 	}
 	while(!scalable_task->done_flag);
@@ -926,13 +920,10 @@ void dhmp_Octopus_work_handler(struct dhmp_work *work)
 	req_msg.task = wwork;
 	req_msg.flag_write = wwork->flag_write;
 	
-	
-	
 	size_t length = sizeof(struct dhmp_octo_request) ;//valid+write/red +addr+size+data
-	
 
 	temp = client->octo.local_mr->addr;
-	memcpy(temp, req_msg ,sizeof(struct dhmp_octo_request));
+	memcpy(temp, &req_msg ,sizeof(struct dhmp_octo_request));
 	if(wwork->flag_write == 1)
 	{
 		memcpy(temp + sizeof(struct dhmp_octo_request), wwork->local_addr, wwork->length);
@@ -943,7 +934,7 @@ void dhmp_Octopus_work_handler(struct dhmp_work *work)
 	if(!write_task)
 	{
 		ERROR_LOG("allocate memory error.");
-		return -1;
+		return ;
 	}
 
 	struct ibv_send_wr send_wr,*bad_wr=NULL;
@@ -954,8 +945,8 @@ void dhmp_Octopus_work_handler(struct dhmp_work *work)
 	send_wr.sg_list=&sge;
 	send_wr.num_sge=1;
 	send_wr.send_flags=IBV_SEND_SIGNALED;
-	send_wr.wr.rdma.remote_addr= ( uintptr_t ) client->octo.S_mr->addr;
-	send_wr.wr.rdma.rkey= client->octo.S_mr->rkey;
+	send_wr.wr.rdma.remote_addr= ( uintptr_t ) client->octo.S_mr.addr;
+	send_wr.wr.rdma.rkey= client->octo.S_mr.rkey;
 	send_wr.imm_data = NUM_octo_req;
 	sge.addr= ( uintptr_t ) client->octo.local_mr->addr;
 	sge.length=length;
@@ -964,7 +955,7 @@ void dhmp_Octopus_work_handler(struct dhmp_work *work)
 
 
 	/*wait for the server return result*/
-	// while(!wwork->recv_flag);
+
 out:	
 	// wwork->done_flag=true; //recv
 }
@@ -1216,11 +1207,9 @@ void dhmp_ReqAddr1_work_handler(struct dhmp_work *dwork)
 
 	work=(struct reqAddr_work*)dwork->work_data;
 
-	/*build malloc request msg*/
+	
 	req_msg.req_size= work->length;
-	req_msg.dhmp_addr = work->dhmp_addr;
 	req_msg.task = work;
-	req_msg.cmpflag = work->cmpflag;
 
 	msg.msg_type=DHMP_MSG_REQADDR1_REQUEST;  
 	
