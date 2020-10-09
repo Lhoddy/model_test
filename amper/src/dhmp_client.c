@@ -15,6 +15,9 @@ unsigned long time_diff_ns;
 
 static void show( struct timespec* time, char output)
 {
+#ifndef taillantency
+	return;
+#endif
 	clock_gettime(CLOCK_MONOTONIC, time);	
 	if(output == 1)
 	{
@@ -380,11 +383,11 @@ void amper_pRDMA_write_senderactive( void * local_buf, size_t count, void * glob
 	return ;
 }
 
-void model_FaRM( void * local_buf, size_t count, void * globle_addr, char flag_write)
+void model_FaRM( uintptr_t * globle_addr , size_t length, uintptr_t * local_addr, char flag_write, char batch)
 {
 	show(&time_start,0);
 	struct dhmp_transport *rdma_trans= client->connect_trans; // assume only one server
-	struct amper_L5_work wwork; //L5 = Farm work
+	struct amper_DaRPC_work wwork; //L5 = Farm work
 	struct dhmp_work *work;
 
 	if(!rdma_trans||rdma_trans->trans_state!=DHMP_TRANSPORT_STATE_CONNECTED)
@@ -400,12 +403,14 @@ void model_FaRM( void * local_buf, size_t count, void * globle_addr, char flag_w
 		return ;
 	}
 	wwork.done_flag=false;
-	wwork.length=count;
-	wwork.local_addr=local_buf;
+	wwork.recv_flag = false;
+	wwork.length= length;
+	wwork.local_addr=local_addr;
 	wwork.rdma_trans=rdma_trans;
-	wwork.dhmp_addr = globle_addr;
+	wwork.globle_addr = globle_addr;
 	wwork.flag_write = flag_write;
-			
+	wwork.batch = batch;
+
 	work->work_type=AMPER_WORK_FaRM;
 	work->work_data=&wwork;
 
@@ -578,9 +583,6 @@ int amper_sendRPC_Tailwind(size_t offset, struct ibv_mr*head_mr, size_t head_siz
 	
 	return 0;
 }
-
-
-
 
 int amper_write_Tailwind(size_t offset, struct ibv_mr*head_mr, size_t head_size , void * local_buf, size_t size)
 {
@@ -798,11 +800,10 @@ int dhmp_send(void *dhmp_addr, void * local_buf, size_t count, bool is_write)
 
 void *rdma_stress()
 {
-	struct dhmp_transport *rdma_trans=NULL;
+	struct dhmp_transport *rdma_trans= client->connect_trans;;
 	struct reqAddr_work wwork;    
 	struct dhmp_work *work;
 
-	rdma_trans=dhmp_get_trans_from_addr(dhmp_addr);
 	if(!rdma_trans||rdma_trans->trans_state!=DHMP_TRANSPORT_STATE_CONNECTED)
 	{
 		ERROR_LOG("rdma connection error.");
@@ -817,7 +818,6 @@ void *rdma_stress()
 	}
 	wwork.done_flag=false;
 	wwork.recv_flag = false;
-	wwork.length=length;
 	wwork.rdma_trans=rdma_trans;	
 
 	work->work_type=DHMP_WORK_REQADDR1;  
@@ -1051,13 +1051,14 @@ struct dhmp_device *dhmp_get_dev_from_client()
 	return res_dev_ptr;
 }
 
-void *rdma_stress_thread()
+void *rdma_stress_thread(void* arg)
 {
-	client->stress.stop = 0;
+	int i = *(int*)arg;
+	client->stress[i].stop = 0;
 	while(1)
 	{
 		rdma_stress();
-		if(client->stress.stop == 1)
+		if(client->stress[i].stop == 1)
 			break;
 	}
 	
@@ -1148,7 +1149,8 @@ void dhmp_client_init(size_t size,int obj_num,int writepart)
 	INIT_LIST_HEAD(&client->work_list);
 	pthread_create(&client->work_thread, NULL, dhmp_work_handle_thread, (void*)client);
 #ifdef RDMA_STRESS
-	pthread_create(&client->stress.stress_thread, NULL, rdma_stress_thread, NULL);
+	for(i = 0;i<STRESS_NUM;i++)
+		pthread_create(&client->stress[i].stress_thread, NULL, rdma_stress_thread, &i);
 #endif
 
 	// dhmp_malloc(0,1);// ringbuffer
@@ -1241,9 +1243,13 @@ void dhmp_client_destroy()
 	int i;
 	INFO_LOG("send all disconnect start.");
 #ifdef RDMA_STRESS
-	client->stress.stop = 1;
-	pthread_join(client->stress.stress_thread, NULL);
+	for(i = 0;i<STRESS_NUM;i++)
+	{
+		client->stress[i].stop = 1;
+		pthread_join(client->stress[i].stress_thread, NULL);
+	}
 #endif
+
 #ifndef UD
 	dhmp_close_connection(client->connect_trans);
 #endif

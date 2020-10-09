@@ -40,6 +40,11 @@
 #define BATCH 1
 #define Tailwind_log_size 100
 
+#define RDMA_STRESS RDMA_STRESS
+#define STRESS_NUM 5
+
+
+#define taillantency taillantency
 //#define DaRPC_SERVER DaRPC_SERVER
 
 
@@ -76,6 +81,7 @@
 //#define FaRM FaRM
 //#define RFLUSH RFLUSH
 // #define FaRM_buffer_NUM 1 
+
 
 
 
@@ -389,7 +395,7 @@ void model_6_Tailwind(int accessnum, int obj_num , size_t length, void * local_a
 void model_3_DaRPC( uintptr_t * globle_addr , size_t length, uintptr_t * local_addr, char flag_write, char batch);
 void model_7_scalable( uintptr_t * globle_addr , size_t length, uintptr_t * local_addr, char flag_write, char batch);
 
-void model_FaRM( void * local_buf, size_t count, void * globle_addr, char flag_write);
+void model_FaRM( uintptr_t * globle_addr , size_t length, uintptr_t * local_addr, char flag_write, char batch);
 
 void send_UD(uintptr_t * globle_addr , size_t length, uintptr_t * local_addr, char flag_write, char batch);
 #endif

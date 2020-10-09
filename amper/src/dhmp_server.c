@@ -320,18 +320,19 @@ void *RFP_run(void* arg1)
 void *FaRM_run(void* arg1)
 {
 	int node_id = *(int*) arg1;
+	char batch = BATCH;
 	int i = 0;
 	INFO_LOG("start FaRM_run epoll");
 	char * reply, * valid;
 	char write_flag;
 	void* local_addr,*server_addr;
 	size_t size =  server->FaRM[node_id].size;
-	size_t buffer_size = sizeof(uintptr_t)*2 + sizeof(size_t) + 2 + size;
+	size_t buffer_size = (sizeof(uintptr_t)*2 + sizeof(size_t) +  size) * batch + 2;
 	void* temp = malloc(buffer_size);
 	server->FaRM[node_id].local_mr = dhmp_create_smr_per_ops(server->connect_trans[node_id], temp, buffer_size)->mr;
 
-	reply = server->FaRM[node_id].S_mr->addr + size;
-	valid = reply + (sizeof(uintptr_t)*2 + sizeof(size_t) + 1);
+	reply = server->FaRM[node_id].S_mr->addr + size * batch;
+	valid = reply + ((sizeof(uintptr_t)*2 + sizeof(size_t))*batch + 1);
 	while(1)
 	{
 		if(server->FaRM[node_id].size == 0)
@@ -391,7 +392,7 @@ void *FaRM_run(void* arg1)
 		send_wr.wr.rdma.remote_addr= ( uintptr_t ) server->FaRM[node_id].C_mr.addr + (i * buffer_size);
 #if((!defined WFLUSH) && (!defined RFLUSH))
 		if(write_flag == 1)
-			send_wr.wr.rdma.remote_addr += size;
+			send_wr.wr.rdma.remote_addr += (size * batch);
 #endif
 		send_wr.wr.rdma.rkey= server->FaRM[node_id].C_mr.rkey;
 		sge.addr= ( uintptr_t )server->FaRM[node_id].local_mr->addr;
@@ -409,8 +410,8 @@ void *FaRM_run(void* arg1)
 #if((defined WFLUSH) || (defined RFLUSH))
 		i = (i + 1) % FaRM_buffer_NUM;
 #endif
-		reply = server->FaRM[node_id].S_mr->addr + size + (i * buffer_size);
-		valid = reply + (sizeof(uintptr_t)*2 + sizeof(size_t) + 1);
+		reply = server->FaRM[node_id].S_mr->addr + size * batch + (i * buffer_size);
+		valid = reply + ((sizeof(uintptr_t)*2 + sizeof(size_t)) * batch + 1);
 		
 	}
 
@@ -483,64 +484,7 @@ void *herd_run(void* arg1)
 
 void *pRDMA_run(void* arg1)
 {
-	int node_id = *(int*) arg1;
-	int i = 0;
-	INFO_LOG("start pRDMA_run epoll");
-	char * reply, * valid;
-	char write_flag;
-	void* local_addr,*server_addr;
-	size_t size =  server->pRDMA[node_id].size;
-	size_t buffer_size = sizeof(uintptr_t)*2 + sizeof(size_t) + 2 + size;
-	reply = server->pRDMA[node_id].S_mr->addr + size;
-	valid = reply + (sizeof(uintptr_t)*2 + sizeof(size_t) + 1);
-	while(1)
-	{
-		if(server->pRDMA[node_id].size == 0)
-		{
-			break;
-		}
-		if(*valid == 0)
-			continue;
-		*valid = 0;
-		INFO_LOG("get new pRDMA messge");
-		server_addr = (void*)*(uintptr_t*)reply;
-		local_addr = (void*)*(uintptr_t*)(reply + sizeof(uintptr_t));
-		write_flag = *(reply + sizeof(uintptr_t)*2 + sizeof(size_t));
-		INFO_LOG("get new pRDMA messge %p %p %d",server_addr,local_addr,write_flag);
-		size_t reply_size = sizeof(uintptr_t)*2 + sizeof(size_t) + 2;
-		if(write_flag == 0)
-			reply_size += size;          
-		void *respond = malloc(reply_size);
-		void * temp = respond;
-		*(char*)(temp) = write_flag;
-		*(char *)(temp + 1) = i;
-		*(uintptr_t*)(temp + 2) = (uintptr_t)server_addr;
-		*(uintptr_t*)(temp + 2 + sizeof(uintptr_t)) = (uintptr_t)local_addr;
-		*(size_t*)(temp + 2 + sizeof(uintptr_t)*2) = size;
-		temp += (2+ sizeof(uintptr_t)*2 + sizeof(size_t));
-		if(write_flag == 1)
-		{
-			memcpy(server_addr, server->pRDMA[node_id].S_mr->addr + i * buffer_size, size);
-			_mm_clflush(server_addr);
-		}
-		else
-			memcpy(temp, server_addr, size);
-
-		struct dhmp_msg res_msg;
-		res_msg.msg_type=DHMP_MSG_pRDMA_WS_RESPONSE;
-		res_msg.data_size= reply_size;
-		res_msg.data= respond;
-		struct dhmp_task * task = dhmp_post_send(server->connect_trans[node_id], &res_msg); 
-		while(!task->done_flag);
-		free(task);
-		free(respond);
-
-		i = (i + 1) % FaRM_buffer_NUM;
-		reply = server->pRDMA[node_id].S_mr->addr + size + (i * buffer_size);
-		valid = reply + (sizeof(uintptr_t)*2 + sizeof(size_t) + 1);
-	}
-
-	return;
+	
 }
 
 
@@ -880,7 +824,8 @@ void amper_allocspace_for_server(struct dhmp_transport* rdma_trans, int is_speci
 		break;
 		case 8: // for FaRM
 		{
-			size_t totol_length = 2 + sizeof(uintptr_t)*2 + sizeof(size_t) + size; // batch + writeORread + readmr  
+			int batch = BATCH; 
+			size_t totol_length = 2 + (sizeof(uintptr_t)*2 + sizeof(size_t) + size)*batch; // batch + writeORread + readmr  
 			temp = nvm_malloc(totol_length * FaRM_buffer_NUM); 
 			temp_smr = dhmp_create_smr_per_ops(rdma_trans, temp, totol_length * FaRM_buffer_NUM);
 			server->FaRM[node_id].S_mr = temp_smr->mr;

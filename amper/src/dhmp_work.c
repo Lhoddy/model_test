@@ -612,24 +612,32 @@ int amper_FaRM_work_handler(struct dhmp_work *work)
 	wwork=(struct amper_L5_work *)work->work_data;
 	struct dhmp_send_mr* local_smr = NULL ;
 	
-	size_t head_size = sizeof(uintptr_t)*2 + sizeof(size_t)+2;
-	size_t buffer_size = head_size + wwork->length;
+	size_t head_size = sizeof(uintptr_t)*2 + sizeof(size_t);
+	size_t buffer_size = (head_size + wwork->length) * wwork->batch +2;
 	void *temp_head ,*temp_all;
 
 	if(wwork->flag_write == 1)
-		head_size += wwork->length;
+		head_size =  wwork->batch * (head_size +  wwork->length) +2 ;
+	else
+		head_size = wwork->batch *(head_size) + 2;
 	temp_all = client->FaRM.local_mr[wwork->cur]->addr;
 	temp_head = temp_all;
-	if(wwork->flag_write == 1)
+
+	for(i = 0;i < wwork->batch;i++)
 	{
-		memcpy(temp_all, wwork->local_addr , wwork->length);
-		temp_head += wwork->length;
+		if(wwork->flag_write == 1)
+		{
+			memcpy(temp_head, (void*)(wwork->local_addr)[i], wwork->length);
+			temp_head += wwork->length;
+		}
+		*(uintptr_t*)(temp_head) = (wwork->globle_addr)[i];
+		*(uintptr_t*)(temp_head + sizeof(uintptr_t)) = (wwork->local_addr)[i];
+		*(size_t*)(temp_head + sizeof(uintptr_t)*2) = wwork->length;
+		temp_head = temp_head + sizeof(uintptr_t)*2 + sizeof(size_t);
 	}
-	*(uintptr_t*)temp_head =(uintptr_t) wwork->dhmp_addr;
-	*(uintptr_t*)(temp_head + sizeof(uintptr_t)) = (uintptr_t)wwork->local_addr;
-	*(size_t*) (temp_head + sizeof(uintptr_t)*2) = wwork->length;
-	*(char * )(temp_head + sizeof(uintptr_t)*2 + sizeof(size_t)) = wwork->flag_write;
-	*(char*)(temp_head + sizeof(uintptr_t)*2 + sizeof(size_t)+1) = 1;//valid
+
+	*(char * )(temp_head ) = wwork->flag_write;
+	*(char*)(temp_head+1) = 1;//valid
 	
 
 	struct dhmp_task* task;
@@ -649,7 +657,7 @@ int amper_FaRM_work_handler(struct dhmp_work *work)
 	send_wr.send_flags=IBV_SEND_SIGNALED;
 	send_wr.wr.rdma.remote_addr= ( uintptr_t ) (&client->FaRM.S_mr)->addr + wwork->cur * buffer_size;
 	if(wwork->flag_write == 0)
-        send_wr.wr.rdma.remote_addr += wwork->length;
+        send_wr.wr.rdma.remote_addr += (wwork->length * wwork->batch);
 	send_wr.wr.rdma.rkey= (&client->FaRM.S_mr)->rkey;
 	sge.addr= ( uintptr_t ) client->FaRM.local_mr[wwork->cur]->addr;
 	sge.length= head_size;
@@ -700,19 +708,21 @@ int amper_FaRM_work_handler(struct dhmp_work *work)
 
 void *FaRM_run_client() 
 {
+	char batch = BATCH;
 	int i = 0;
 	char * reply, * valid;
 	char write_flag;
 	void* local_addr;
-	size_t buffer_size =  sizeof(uintptr_t)*2 + sizeof(size_t) + 2 + client->FaRM.size;
-	reply = client->FaRM.C_mr->addr + client->FaRM.size;
-	valid = reply + (sizeof(uintptr_t)*2 + sizeof(size_t) + 1);
+	size_t size = client->FaRM.size;
+	size_t buffer_size =  (sizeof(uintptr_t)*2 + sizeof(size_t) + size) * batch + 2;
+	reply = client->FaRM.C_mr->addr + size * batch;
+	valid = reply + ((sizeof(uintptr_t)*2 + sizeof(size_t))*batch + 1);
 #if((defined WFLUSH) || (defined RFLUSH))
 	valid = client->FaRM.C_mr->addr;
 #endif
 	while(1)
 	{
-		if(client->FaRM.size == 0)
+		if(size == 0)
 		{
 			break;
 		}
@@ -723,7 +733,7 @@ void *FaRM_run_client()
 		local_addr = (void*)*(uintptr_t*)(reply + sizeof(uintptr_t));
 		write_flag = *(reply + sizeof(uintptr_t)*2 + sizeof(size_t));
 		if(write_flag == 0)
-			memcpy(local_addr , client->FaRM.C_mr->addr + buffer_size * client->FaRM.Ccur , client->FaRM.size);
+			memcpy(local_addr , client->FaRM.C_mr->addr + buffer_size * client->FaRM.Ccur , size);
 #endif
 		pthread_mutex_lock(&client->mutex_request_num);
 		client->FaRM.is_available[client->FaRM.Ccur] = 1;
@@ -1215,9 +1225,11 @@ void dhmp_ReqAddr1_work_handler(struct dhmp_work *dwork)
 	
 	msg.data_size = sizeof(struct dhmp_ReqAddr1_request);
 	msg.data = &req_msg;
-
+#ifdef UD
+	amper_ud_post_send(work->rdma_trans,&msg);
+#else
 	dhmp_post_send(work->rdma_trans, &msg);
-
+#endif
 	/*wait for the server return result*/
 	while(!work->recv_flag);
 	work->done_flag=true;

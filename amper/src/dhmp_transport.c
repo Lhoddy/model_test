@@ -1755,8 +1755,11 @@ void dhmp_ReqAddr1_request_handler(struct dhmp_transport* rdma_trans, struct dhm
 	res_msg.msg_type=DHMP_MSG_REQADDR1_RESPONSE;
 	res_msg.data_size=sizeof(struct dhmp_ReqAddr1_response);
 	res_msg.data=&response;
-
+#ifdef UD
+	amper_ud_post_send(rdma_trans,&res_msg);
+#else
 	dhmp_post_send(rdma_trans, &res_msg);
+#endif
 	return ;
 }
 

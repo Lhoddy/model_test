@@ -132,7 +132,7 @@ struct dhmp_client{
 	struct{
 		pthread_t stress_thread;
 		int stop;
-	}stress;
+	}stress[20];
 };
 
 extern struct dhmp_client *client;
