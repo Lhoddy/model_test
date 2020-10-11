@@ -1163,8 +1163,12 @@ void dhmp_client_init(size_t size,int obj_num,int writepart)
 		
 	}
 	{//scaleRPC
-		client->scaleRPC.Creq_mr = client->per_ops_mr->mr;
-		client->scaleRPC.Cdata_mr = client->per_ops_mr2->mr;
+		char batch = BATCH;
+		buffer_size = sizeof(uintptr_t)*2 + sizeof(size_t)+2 + size+4;
+		temp = malloc(buffer_size * batch); 
+		client->scaleRPC.Creq_mr = dhmp_create_smr_per_ops(client->connect_trans, temp, buffer_size* batch)->mr;
+		temp = malloc(buffer_size * batch); 
+		client->scaleRPC.Cdata_mr = dhmp_create_smr_per_ops(client->connect_trans, temp, buffer_size* batch)->mr;
 	}
 	{//L5
 		client->local_mr = client->per_ops_mr->mr;

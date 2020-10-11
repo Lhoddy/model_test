@@ -62,7 +62,7 @@ struct dhmp_device *dhmp_get_dev_from_server()
 }
 
 
-struct dhmp_area *dhmp_area_create(size_t length)
+struct dhmp_area *dhmp_area_create(size_t length,,int node_id)
 {
 	void *addr=NULL;
 	struct dhmp_area *area=NULL;
@@ -101,7 +101,7 @@ struct dhmp_area *dhmp_area_create(size_t length)
 	area->mr=mr;
 	area->size = length;
 
-		list_add(&area->area_entry, &server->area_list[0]);
+		list_add(&area->area_entry, &server->area_list[node_id]);
 	
 	return area;
 
@@ -300,6 +300,8 @@ void *RFP_run(void* arg1)
 	INFO_LOG("start RFP epoll");
 	while(1)
 	{
+		if(server->RFP[node_id].time == 0)
+			break;
 		if(server->RFP[node_id].write_mr == NULL) continue;
 		if(*poll_addr != 0)
 		{
@@ -308,8 +310,7 @@ void *RFP_run(void* arg1)
 			*poll_addr = 0;
 			
 		}
-		if(server->RFP[node_id].time == 0)
-			break;
+		
 	}
 	return;
 }
@@ -678,10 +679,10 @@ void dhmp_server_init()
 	}	
 #endif
 	server->L5_mailbox.addr = NULL;
-	for(i=0; i<DHMP_CLIENT_NODE_NUM; i++)
-	{
-		server->Tailwind_buffer[i].addr = NULL;
-	}
+	// for(i=0; i<DHMP_CLIENT_NODE_NUM; i++)
+	// {
+	// 	server->Tailwind_buffer[i].addr = NULL;
+	// }
 
 #ifdef UD
 	err=dhmp_transport_listen_UD(server->listen_trans,
@@ -694,7 +695,11 @@ void dhmp_server_init()
 		exit(- 1);
 
 	/*create one area and init area list*/	
-	INIT_LIST_HEAD(&server->area_list[0]);
+	for( i  =0;i<DHMP_CLIENT_NODE_NUM;i++)
+	{
+		INIT_LIST_HEAD(&server->area_list[i]);
+	}
+	
 	// server->cur_area=dhmp_area_create(2097152);
 
 #ifdef model_B
@@ -740,6 +745,8 @@ void dhmp_server_destroy()
 void amper_allocspace_for_server(struct dhmp_transport* rdma_trans, int is_special, size_t size)
 {
 	int node_id = rdma_trans->node_id;
+	int * arg = malloc(sizeof(int)); 
+	*arg = node_id;
 	struct dhmp_send_mr* temp_smr;
 	void * temp;
 	switch(is_special)
@@ -760,7 +767,7 @@ void amper_allocspace_for_server(struct dhmp_transport* rdma_trans, int is_speci
 			temp_smr = dhmp_create_smr_per_ops(rdma_trans, server->L5_message[node_id].addr, size+18);
 			server->L5_message[node_id].mr = temp_smr->mr;
 			INFO_LOG("L5 buffer %d %p is ready.",node_id,server->L5_mailbox.mr->addr);
-			void * temp = malloc(size + sizeof(size_t) + 1) ;
+			temp = malloc(size + sizeof(size_t) + 1) ;
 			server->L5_message[node_id].reply_smr = dhmp_create_smr_per_ops(rdma_trans, temp , size + sizeof(size_t) + 1);
 		}
 		break;
@@ -775,12 +782,12 @@ void amper_allocspace_for_server(struct dhmp_transport* rdma_trans, int is_speci
 			temp_smr = dhmp_create_smr_per_ops(rdma_trans, server->Tailwind_buffer[node_id].addr, size);
 			server->Tailwind_buffer[node_id].mr = temp_smr->mr;
 			free(temp_smr);//!!!!!!!!!!!!!!!
-#ifdef FLUSH2
-			struct {int node_id;size_t size;} data;
-			data.node_id = node_id;
-			data.size = size;
-			pthread_create(&server->Tailwind_buffer[node_id].poll_thread, NULL, tailwind_flush2_run, &data);
-#endif
+// #ifdef FLUSH2
+// 			struct {int node_id;size_t size;} data;
+// 			data.node_id = node_id;
+// 			data.size = size;
+// 			pthread_create(&server->Tailwind_buffer[node_id].poll_thread, NULL, tailwind_flush2_run, &data);
+// #endif
 		}
 		break;
 		case 5: // for DaRPC only need once
@@ -800,7 +807,8 @@ void amper_allocspace_for_server(struct dhmp_transport* rdma_trans, int is_speci
 			temp_smr = dhmp_create_smr_per_ops(rdma_trans, temp, size + 24);
 			server->RFP[node_id].read_mr = temp_smr->mr;
 			server->RFP[node_id].size = size;
-			pthread_create(&server->RFP[node_id].poll_thread, NULL, RFP_run, &node_id);
+
+			pthread_create(&server->RFP[node_id].poll_thread, NULL, RFP_run, arg);
 		}
 		break;
 		case 7: // for scaleRPC
@@ -819,7 +827,7 @@ void amper_allocspace_for_server(struct dhmp_transport* rdma_trans, int is_speci
 			temp_smr = dhmp_create_smr_per_ops(rdma_trans, temp, totol_length);
 			server->scaleRPC[node_id].Slocal_mr = temp_smr->mr;
 			server->scaleRPC[node_id].size = size;
-			pthread_create(&(server->scalable_poll_thread[node_id]), NULL, scalable_run, &node_id);
+			pthread_create(&(server->scalable_poll_thread[node_id]), NULL, scalable_run, arg);
 		}
 		break;
 		case 8: // for FaRM
@@ -830,7 +838,7 @@ void amper_allocspace_for_server(struct dhmp_transport* rdma_trans, int is_speci
 			temp_smr = dhmp_create_smr_per_ops(rdma_trans, temp, totol_length * FaRM_buffer_NUM);
 			server->FaRM[node_id].S_mr = temp_smr->mr;
 			server->FaRM[node_id].size = size;
-			pthread_create(&(server->FaRM[node_id].poll_thread), NULL, FaRM_run, &node_id);
+			pthread_create(&(server->FaRM[node_id].poll_thread), NULL, FaRM_run, arg);
 		}
 		break;
 		case 9: // for herd
@@ -840,7 +848,7 @@ void amper_allocspace_for_server(struct dhmp_transport* rdma_trans, int is_speci
 			temp_smr = dhmp_create_smr_per_ops(rdma_trans, temp, totol_length * FaRM_buffer_NUM);
 			server->herd[node_id].S_mr = temp_smr->mr;
 			server->herd[node_id].size = size;
-			pthread_create(&(server->herd[node_id].poll_thread), NULL, herd_run, &node_id);
+			pthread_create(&(server->herd[node_id].poll_thread), NULL, herd_run, arg);
 		}
 		break;
 		case 10: // for octo

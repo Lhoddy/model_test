@@ -138,7 +138,7 @@ struct dhmp_server{
 
 extern struct dhmp_server *server;
 
-struct dhmp_area *dhmp_area_create(size_t length);
+struct dhmp_area *dhmp_area_create(size_t length,int node_id);
 struct ibv_mr * dhmp_malloc_poll_area(size_t length);
 
 struct dhmp_device *dhmp_get_dev_from_server();

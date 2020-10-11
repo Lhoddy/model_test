@@ -69,7 +69,7 @@ int main(int argc,char *argv[])
 	struct timespec task_time_start, task_time_end;
 	unsigned long task_time_diff_ns;
 	char batch;
-	uintptr_t local_addr;
+	uintptr_t* local_addr = malloc(BATCH*sizeof(uintptr_t));
 	
 	if(argc<3)
 	{
@@ -142,7 +142,8 @@ int main(int argc,char *argv[])
 		addr[i]=dhmp_malloc(size,0);
 	dhmp_malloc(size,8); //for FaRM
 	uintptr_t* temp = malloc(batch*sizeof(uintptr_t));
-	local_addr = (uintptr_t)str;
+	for(k = 0;k<batch;k++)
+		local_addr[k] = (uintptr_t)str;
 	show("start count",&task_time_start);
 
 	for(j=0;j<(accessnum /100 )* write_part;j++)
@@ -150,14 +151,14 @@ int main(int argc,char *argv[])
 		i = j%objnum;
 		for(k = 0;k<batch;k++)
 			temp[k] = (uintptr_t)(addr[rand_num[(i+k)%objnum]]);
-		model_FaRM(temp, size, &local_addr, 1 , batch);
+		model_FaRM(temp, size, local_addr, 1 , batch);
 	}
 	for(;j<accessnum;j++)
 	{ 
 		i = j%objnum;
 		for(k = 0;k<batch;k++)
 			temp[k] = (uintptr_t)(addr[rand_num[(i+k)%objnum]]);
-		model_FaRM(temp, size, &local_addr, 0 , batch);
+		model_FaRM(temp, size, local_addr, 0 , batch);
 	}
 	show("over count",&task_time_end);
 
@@ -189,21 +190,22 @@ int main(int argc,char *argv[])
 		addr[i]=dhmp_malloc(size,0);
 	dhmp_malloc(size,7); //scaleRPC
 	uintptr_t* temp = malloc(batch*sizeof(uintptr_t));
-	local_addr = (uintptr_t)str;
+	for(k = 0;k<batch;k++)
+		local_addr[k] = (uintptr_t)str;
 	show("start count",&task_time_start);
 	for(j=0;j<(accessnum /100 )* write_part;j=j+batch)
 	{ 
 		i = j%objnum;
 		for(k = 0;k<batch;k++)
 			temp[k] = (uintptr_t)(addr[rand_num[(i+k)%objnum]]);
-		model_7_scalable(temp, size, &local_addr, 1 , batch);
+		model_7_scalable(temp, size, local_addr, 1 , batch);
 	}
 	for(;j<accessnum;j=j+batch)
 	{ 
 		i = j%objnum;
 		for(k = 0;k<batch;k++)
 			temp[k] = (uintptr_t)(addr[rand_num[(i+k)%objnum]]);
-		model_7_scalable(temp, size, &local_addr, 0 , batch);
+		model_7_scalable(temp, size, local_addr, 0 , batch);
 	}
 	show("over count",&task_time_end);
 #endif
@@ -214,21 +216,23 @@ int main(int argc,char *argv[])
 	dhmp_malloc(0,5); //DaRPC
 	batch = BATCH;
 	uintptr_t* temp = malloc(batch*sizeof(uintptr_t));
-	local_addr = (uintptr_t)str;
+	for(k = 0;k<batch;k++)
+		local_addr[k] = (uintptr_t)str;
 	show("start count",&task_time_start);
 	for(j=0;j<(accessnum /100 )* write_part;j=j+batch)
 	{ 
 		i = j%objnum;
 		for(k = 0;k<batch;k++)
 			temp[k] = (uintptr_t)(addr[rand_num[(i+k)%objnum]]);
-		model_3_DaRPC(temp, size, &local_addr, 1 , batch);//用的默认的send recv queue
+		
+		model_3_DaRPC(temp, size, local_addr, 1 , batch);//用的默认的send recv queue
 	}
 	for(;j<accessnum;j=j+batch)
 	{ 
 		i = j%objnum;
 		for(k = 0;k<batch;k++)
 			temp[k] = (uintptr_t)(addr[rand_num[(i+k)%objnum]]);
-		model_3_DaRPC(temp, size, &local_addr, 0 , batch); //用的默认的send recv queue
+		model_3_DaRPC(temp, size, local_addr, 0 , batch); //用的默认的send recv queue
 	}
 
 	show("over count",&task_time_end);
@@ -237,23 +241,24 @@ int main(int argc,char *argv[])
 //need #define UD
 	for(i=0;i<objnum;i++)
 		addr[i]=dhmp_malloc(size,0);
-	batch = 1;
+	batch = BATCH;
 	uintptr_t* temp = malloc(batch*sizeof(uintptr_t));
-	local_addr = (uintptr_t)str;
+	for(k = 0;k<batch;k++)
+		local_addr[k] = (uintptr_t)str;
 	show("start count",&task_time_start);
 	for(j=0;j<(accessnum /100 )* write_part;j=j+batch)
 	{ 
 		i = j%objnum;
 		for(k = 0;k<batch;k++)
 			temp[k] = (uintptr_t)addr[rand_num[(i+k)%objnum]];
-		send_UD(temp, size, &local_addr, 1 , batch);//用的默认的send recv queue
+		send_UD(temp, size, local_addr, 1 , batch);//用的默认的send recv queue
 	}
 	for(;j<accessnum;j=j+batch)
 	{ 
 		i = j%objnum;
 		for(k = 0;k<batch;k++)
 			temp[k] = (uintptr_t)addr[rand_num[(i+k)%objnum]];
-		send_UD(temp, size, &local_addr , 0 , batch); //用的默认的send recv queue
+		send_UD(temp, size, local_addr , 0 , batch); //用的默认的send recv queue
 	}
 	check_request(3);
 	show("over count",&task_time_end);

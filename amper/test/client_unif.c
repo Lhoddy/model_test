@@ -184,7 +184,7 @@ int main(int argc,char *argv[])
 //need #define UD
 	for(i=0;i<objnum;i++)
 		addr[i]=dhmp_malloc(size,0);
-	batch = 1;
+	batch = BATCH;
 	int k;
 	uintptr_t* temp = malloc(batch*sizeof(uintptr_t));
 	local_addr = (uintptr_t)str;

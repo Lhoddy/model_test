@@ -144,11 +144,11 @@ static void dhmp_send_response_handler(struct dhmp_transport* rdma_trans,struct 
  */
 static bool dhmp_malloc_area(struct dhmp_msg* msg, 
 										struct dhmp_mc_response* response_msg,
-										size_t length )
+										size_t length ,int node_id)
 {
 	struct dhmp_area *area;
 
-	area=dhmp_area_create(length);
+	area=dhmp_area_create(length,node_id);
 	if(!area)
 	{
 		ERROR_LOG("allocate one area error.");
@@ -250,7 +250,7 @@ static void dhmp_malloc_request_handler(struct dhmp_transport* rdma_trans,
 	{
 		if(response.req_info.req_size <= SINGLE_AREA_SIZE)
 		{
-			res=dhmp_malloc_area(msg, &response, response.req_info.req_size);
+			res=dhmp_malloc_area(msg, &response, response.req_info.req_size, rdma_trans->node_id);
 		}
 		if(!res)
 			goto req_error;
@@ -571,7 +571,7 @@ static void dhmp_wc_success_handler(struct ibv_wc* wc)
 		msg.data_size=*(size_t*)(message_cxt+sizeof(enum dhmp_msg_type));
 		msg.data=message_cxt+sizeof(enum dhmp_msg_type)+sizeof(size_t);
 	}
-	INFO_LOG("opcode:%s , %p",dhmp_wc_opcode_str(wc->opcode),rdma_trans);
+	INFO_LOG("opcode:%s , %d",dhmp_wc_opcode_str(wc->opcode),rdma_trans->node_id);
 	switch(wc->opcode)
 	{
 		case IBV_WC_RECV_RDMA_WITH_IMM:
